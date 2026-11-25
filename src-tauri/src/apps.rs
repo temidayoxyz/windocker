@@ -1,23 +1,33 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use windows::core::{BOOL, Interface, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ};
-use windows::Win32::System::Threading::{
-    AttachThreadInput, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
-    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
-};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
-use windows::Win32::UI::Shell::{IShellLinkW, SHGetFileInfoW, ShellLink, SHFILEINFOW, SHGFI_ICON};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    STGM_READ,
+};
+use windows::Win32::System::Threading::{
+    AttachThreadInput, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW,
+    TerminateProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+};
+use windows::Win32::UI::Shell::{
+    IShellLinkW, SHGetFileInfoW, ShellLink, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    BringWindowToTop, EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    PrivateExtractIconsW, SetForegroundWindow, ShowWindow, HICON, SW_MINIMIZE, SW_RESTORE,
+    SW_SHOW,
 };
 
 use crate::model::{AppEntry, RunningWindow};
 use crate::shell::{self, open_path};
+
+static EXE_ICON_CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
 
 pub fn scan_apps() -> Vec<AppEntry> {
     unsafe {
@@ -27,12 +37,16 @@ pub fn scan_apps() -> Vec<AppEntry> {
     if let Ok(appdata) = std::env::var("APPDATA") {
         roots.push(PathBuf::from(appdata).join("Microsoft\\Windows\\Start Menu\\Programs"));
     }
-    roots.push(PathBuf::from(r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs"));
+    roots.push(PathBuf::from(
+        r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+    ));
     let mut found = Vec::new();
     for root in roots {
         walk(&root, &mut found);
     }
     found.push(explorer_entry());
+    found.push(settings_entry());
+    found.push(taskmgr_entry());
     found.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     found.dedup_by(|a, b| a.exe.eq_ignore_ascii_case(&b.exe) && !a.exe.is_empty());
     found
@@ -42,15 +56,26 @@ fn walk(dir: &Path, out: &mut Vec<AppEntry>) {
     if out.len() > 450 {
         return;
     }
-    let Ok(read) = std::fs::read_dir(dir) else { return };
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in read.flatten() {
         let path = entry.path();
         if path.is_dir() {
             walk(&path, out);
             continue;
         }
-        if path.extension().and_then(|e| e.to_str()).unwrap_or("").eq_ignore_ascii_case("lnk") {
-            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .eq_ignore_ascii_case("lnk")
+        {
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             let lower = name.to_lowercase();
             if lower.contains("uninstall") || lower.contains("readme") || lower == "help" {
                 continue;
@@ -65,7 +90,9 @@ fn walk(dir: &Path, out: &mut Vec<AppEntry>) {
 fn lnk_app(path: &Path, name: &str) -> Option<AppEntry> {
     let launch = path.to_string_lossy().to_string();
     let exe = resolve_lnk(path).unwrap_or_default();
-    let icon = file_icon(&launch).or_else(|| file_icon(&exe));
+    let icon = highres_exe_icon(&exe)
+        .or_else(|| file_icon(&launch))
+        .or_else(|| file_icon(&exe));
     Some(AppEntry {
         id: launch.to_lowercase(),
         name: name.to_string(),
@@ -82,7 +109,28 @@ fn explorer_entry() -> AppEntry {
         name: "File Explorer".into(),
         launch: exe.clone(),
         exe: exe.clone(),
-        icon: file_icon(&exe),
+        icon: highres_exe_icon(&exe).or_else(|| file_icon(&exe)),
+    }
+}
+
+fn settings_entry() -> AppEntry {
+    AppEntry {
+        id: "ms-settings".into(),
+        name: "Settings".into(),
+        launch: "ms-settings:".into(),
+        exe: r"C:\Windows\ImmersiveControlPanel\SystemSettings.exe".into(),
+        icon: None,
+    }
+}
+
+fn taskmgr_entry() -> AppEntry {
+    let exe = r"C:\Windows\System32\Taskmgr.exe".to_string();
+    AppEntry {
+        id: "taskmgr".into(),
+        name: "Activity Monitor".into(),
+        launch: exe.clone(),
+        exe: exe.clone(),
+        icon: highres_exe_icon(&exe).or_else(|| file_icon(&exe)),
     }
 }
 
@@ -90,17 +138,55 @@ fn resolve_lnk(path: &Path) -> Option<String> {
     unsafe {
         let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
         let persist: IPersistFile = link.cast().ok()?;
-        let wide: Vec<u16> = path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+        let wide: Vec<u16> = path
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         persist.Load(PCWSTR(wide.as_ptr()), STGM_READ).ok()?;
         let mut buf = [0u16; 520];
         link.GetPath(&mut buf, std::ptr::null_mut(), 0).ok()?;
         let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
         let text = String::from_utf16_lossy(&buf[..end]);
-        if text.is_empty() { None } else { Some(text) }
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
     }
 }
 
-fn file_icon(path: &str) -> Option<String> {
+fn highres_exe_icon(path: &str) -> Option<String> {
+    if path.is_empty() || !path.to_lowercase().ends_with(".exe") {
+        return None;
+    }
+    unsafe {
+        let mut buf = [0u16; 260];
+        let mut units: Vec<u16> = path.encode_utf16().take(259).collect();
+        if units.is_empty() {
+            return None;
+        }
+        buf[..units.len()].copy_from_slice(&units);
+        let _ = &mut units;
+        let mut hicon = [HICON::default(); 1];
+        let mut icon_id = [0u32; 1];
+        let count = PrivateExtractIconsW(
+            &buf,
+            0,
+            96,
+            96,
+            Some(&mut hicon),
+            Some(icon_id.as_mut_ptr()),
+            0,
+        );
+        if count > 0 && !hicon[0].is_invalid() {
+            return shell::icon_png(hicon[0]);
+        }
+        None
+    }
+}
+
+pub fn file_icon(path: &str) -> Option<String> {
     if path.is_empty() {
         return None;
     }
@@ -112,7 +198,7 @@ fn file_icon(path: &str) -> Option<String> {
             FILE_ATTRIBUTE_NORMAL,
             Some(&mut info),
             std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON,
+            SHGFI_ICON | SHGFI_LARGEICON,
         );
         if got == 0 || info.hIcon.is_invalid() {
             return None;
@@ -121,8 +207,34 @@ fn file_icon(path: &str) -> Option<String> {
     }
 }
 
+pub fn cached_exe_icon(path: &str) -> Option<String> {
+    let key = path.to_lowercase();
+    {
+        let mut guard = EXE_ICON_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let map = guard.get_or_insert_with(HashMap::new);
+        if let Some(found) = map.get(&key) {
+            return found.clone();
+        }
+    }
+    let icon = highres_exe_icon(path).or_else(|| file_icon(path));
+    let mut guard = EXE_ICON_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(HashMap::new);
+    if map.len() < 160 {
+        map.insert(key, icon.clone());
+    }
+    icon
+}
+
 pub fn suggest_pins(apps: &[AppEntry]) -> Vec<String> {
-    let wanted = ["file explorer", "windows terminal", "visual studio code", "google chrome", "microsoft edge", "notepad"];
+    let wanted = [
+        "file explorer",
+        "windows terminal",
+        "visual studio code",
+        "google chrome",
+        "microsoft edge",
+        "notepad",
+        "settings",
+    ];
     let mut pins = vec!["explorer".to_string()];
     for name in wanted {
         if let Some(app) = apps.iter().find(|a| a.name.eq_ignore_ascii_case(name)) {
@@ -140,7 +252,9 @@ struct EnumState {
 }
 
 pub fn running_windows() -> Vec<RunningWindow> {
-    let mut state = EnumState { windows: Vec::new() };
+    let mut state = EnumState {
+        windows: Vec::new(),
+    };
     unsafe {
         let ptr = &mut state as *mut EnumState;
         let _ = EnumWindows(Some(enum_proc), LPARAM(ptr as isize));
@@ -150,7 +264,9 @@ pub fn running_windows() -> Vec<RunningWindow> {
 
 unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let state = &mut *(lparam.0 as *mut EnumState);
-    if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() && window_title(hwnd).is_empty() {
+    if !IsWindowVisible(hwnd).as_bool()
+        || IsIconic(hwnd).as_bool() && window_title(hwnd).is_empty()
+    {
         return true.into();
     }
     let mut cloaked = 0u32;
@@ -163,7 +279,12 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let class_name = String::from_utf16_lossy(&class[..n as usize]);
     if matches!(
         class_name.as_str(),
-        "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "Progman" | "WorkerW" | "Windows.UI.Core.CoreWindow" | "NotifyIconOverflowWindow"
+        "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "Progman"
+            | "WorkerW"
+            | "Windows.UI.Core.CoreWindow"
+            | "NotifyIconOverflowWindow"
     ) {
         return true.into();
     }
@@ -181,7 +302,19 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     if lower.ends_with("windocker.exe") || lower.ends_with("applicationframehost.exe") {
         return true.into();
     }
-    state.windows.push(RunningWindow { hwnd: hwnd.0 as i64, exe, title });
+    let name = Path::new(&exe)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("App")
+        .to_string();
+    let icon = cached_exe_icon(&exe);
+    state.windows.push(RunningWindow {
+        hwnd: hwnd.0 as i64,
+        exe,
+        title,
+        name,
+        icon,
+    });
     true.into()
 }
 
@@ -202,7 +335,13 @@ fn process_path(pid: u32) -> Option<String> {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut buf = [0u16; 520];
         let mut size = buf.len() as u32;
-        QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut size).ok()?;
+        QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut size,
+        )
+        .ok()?;
         let _ = windows::Win32::Foundation::CloseHandle(handle);
         Some(String::from_utf16_lossy(&buf[..size as usize]))
     }
@@ -215,18 +354,25 @@ pub fn entry_from_dropped(path: &str) -> Result<AppEntry, String> {
     }
     let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("lnk") {
-        let name = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("App");
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("App");
         return lnk_app(path, name).ok_or_else(|| "That shortcut could not be read.".into());
     }
     if ext.eq_ignore_ascii_case("exe") {
-        let name = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("App").to_string();
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("App")
+            .to_string();
         let exe = path.to_string_lossy().to_string();
         return Ok(AppEntry {
             id: exe.to_lowercase(),
             name,
             launch: exe.clone(),
             exe: exe.clone(),
-            icon: file_icon(&exe),
+            icon: highres_exe_icon(&exe).or_else(|| file_icon(&exe)),
         });
     }
     Err("Drop an application or a shortcut onto the dock.".into())
@@ -267,8 +413,13 @@ pub fn activate(hwnd_value: i64) -> Result<(), String> {
 pub fn close_window(hwnd_value: i64) -> Result<(), String> {
     let hwnd = HWND(hwnd_value as *mut _);
     unsafe {
-        windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(hwnd), windows::Win32::UI::WindowsAndMessaging::WM_CLOSE, windows::Win32::Foundation::WPARAM(0), LPARAM(0))
-            .map_err(|e| e.to_string())
+        windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+            Some(hwnd),
+            windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+            windows::Win32::Foundation::WPARAM(0),
+            LPARAM(0),
+        )
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -306,17 +457,11 @@ pub fn foreground_app() -> Option<String> {
 }
 
 pub fn exe_key(path: &str) -> String {
-    Path::new(path).file_name().and_then(|s| s.to_str()).unwrap_or(path).to_lowercase()
-}
-
-pub fn index_by_exe(apps: &[AppEntry]) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for app in apps {
-        if !app.exe.is_empty() {
-            map.insert(exe_key(&app.exe), app.id.clone());
-        }
-    }
-    map
+    Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_lowercase()
 }
 
 #[allow(dead_code)]
@@ -328,5 +473,3 @@ pub fn window_rect(hwnd_value: i64) -> Option<RECT> {
         Some(rect)
     }
 }
-
-use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;

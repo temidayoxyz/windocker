@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +50,11 @@ pub struct CalEvent {
     pub source: String,
 }
 
+fn default_icon_pack() -> String { "sequoia".into() }
+fn default_true() -> bool { true }
+fn default_pomo_round() -> u32 { 1 }
+fn default_pomo_total_rounds() -> u32 { 4 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -71,6 +77,20 @@ pub struct Config {
     pub display_mode: String,
     pub clock_24h: bool,
     pub launch_at_startup: bool,
+    #[serde(default = "default_icon_pack")]
+    pub icon_pack: String,
+    #[serde(default = "default_true")]
+    pub squircle_wrap: bool,
+    #[serde(default = "default_true")]
+    pub show_running_apps: bool,
+    #[serde(default = "default_true")]
+    pub dock_divider: bool,
+    #[serde(default)]
+    pub native_blur: bool,
+    #[serde(default)]
+    pub auto_pause_meeting: bool,
+    #[serde(default)]
+    pub custom_icons: HashMap<String, String>,
     pub widgets: Vec<Widget>,
     pub pins: Vec<Pin>,
     pub groups: Vec<Group>,
@@ -80,6 +100,8 @@ pub struct Config {
     pub weather_query: String,
     pub github_token: String,
     pub ical_url: String,
+    #[serde(default)]
+    pub deepseek_key: String,
     pub currency_from: String,
     pub currency_to: String,
     pub currency_amount: f64,
@@ -93,20 +115,24 @@ pub struct Config {
     pub pomo_running: bool,
     pub pomo_focus_min: u32,
     pub pomo_break_min: u32,
+    #[serde(default = "default_pomo_round")]
+    pub pomo_round: u32,
+    #[serde(default = "default_pomo_total_rounds")]
+    pub pomo_total_rounds: u32,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             first_launch_complete: false,
-            style: "glass".into(),
+            style: "liquid-glass".into(),
             accent: "#0a84ff".into(),
             edge: "bottom".into(),
             layout: "pill".into(),
             scale: 1.0,
             spacing: 8,
-            padding: 8,
+            padding: 7,
             edge_distance: 10,
             auto_hide: false,
             magnification: true,
@@ -117,13 +143,21 @@ impl Default for Config {
             display_mode: "primary".into(),
             clock_24h: false,
             launch_at_startup: false,
+            icon_pack: default_icon_pack(),
+            squircle_wrap: true,
+            show_running_apps: true,
+            dock_divider: true,
+            native_blur: false,
+            auto_pause_meeting: false,
+            custom_icons: HashMap::new(),
             widgets: vec![
+                Widget { id: "w-quick".into(), kind: "quick".into(), settings: serde_json::json!({}) },
                 Widget { id: "w-volume".into(), kind: "volume".into(), settings: serde_json::json!({}) },
                 Widget { id: "w-apps".into(), kind: "apps".into(), settings: serde_json::json!({}) },
-                Widget { id: "w-weather".into(), kind: "weather".into(), settings: serde_json::json!({}) },
-                Widget { id: "w-cpu".into(), kind: "cpu".into(), settings: serde_json::json!({}) },
-                Widget { id: "w-battery".into(), kind: "battery".into(), settings: serde_json::json!({ "style": "pill" }) },
-                Widget { id: "w-clock".into(), kind: "clock".into(), settings: serde_json::json!({}) },
+                Widget { id: "w-rings".into(), kind: "system-rings".into(), settings: serde_json::json!({}) },
+                Widget { id: "w-battery".into(), kind: "battery".into(), settings: serde_json::json!({ "style": "wave" }) },
+                Widget { id: "w-today".into(), kind: "today".into(), settings: serde_json::json!({}) },
+                Widget { id: "w-trash".into(), kind: "recycle".into(), settings: serde_json::json!({}) },
             ],
             pins: Vec::new(),
             groups: Vec::new(),
@@ -137,6 +171,7 @@ impl Default for Config {
             weather_query: String::new(),
             github_token: String::new(),
             ical_url: String::new(),
+            deepseek_key: String::new(),
             currency_from: "USD".into(),
             currency_to: "EUR".into(),
             currency_amount: 100.0,
@@ -150,6 +185,8 @@ impl Default for Config {
             pomo_running: false,
             pomo_focus_min: 25,
             pomo_break_min: 5,
+            pomo_round: 1,
+            pomo_total_rounds: 4,
         }
     }
 }
@@ -170,6 +207,8 @@ pub struct RunningWindow {
     pub hwnd: i64,
     pub exe: String,
     pub title: String,
+    pub name: String,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -222,8 +261,12 @@ pub struct WeatherNow {
     pub temp_c: f32,
     pub code: i32,
     pub wind: f32,
+    pub humidity: f32,
+    pub precip: f32,
     pub hi: f32,
     pub lo: f32,
+    pub sunrise: String,
+    pub sunset: String,
     pub hourly: Vec<HourPoint>,
     pub daily: Vec<DayPoint>,
     pub error: Option<String>,
@@ -251,6 +294,22 @@ pub struct CurrencyNow {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AiProviderStat {
+    pub id: String,
+    pub name: String,
+    pub primary_label: String,
+    pub primary_pct: f32,
+    pub primary_meta: String,
+    pub secondary_label: String,
+    pub secondary_pct: f32,
+    pub secondary_meta: String,
+    pub model: String,
+    pub detail: String,
+    pub connected: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppTime {
     pub name: String,
     pub seconds: u64,
@@ -262,6 +321,14 @@ pub struct CityClock {
     pub label: String,
     pub time: String,
     pub offset: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WallpaperItem {
+    pub path: String,
+    pub name: String,
+    pub thumb: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -279,11 +346,13 @@ pub struct Snapshot {
     pub volume: f32,
     pub muted: bool,
     pub mic_muted: bool,
+    pub audio_device: String,
     pub wifi_on: Option<bool>,
     pub bluetooth_on: Option<bool>,
     pub brightness: Option<u32>,
     pub toasts_enabled: Option<bool>,
     pub light_theme: bool,
+    pub wallpaper_thumb: Option<String>,
     pub running: Vec<RunningWindow>,
     pub media: Option<MediaNow>,
     pub disks: Vec<DiskStat>,
@@ -298,6 +367,7 @@ pub struct Snapshot {
     pub weather: Option<WeatherNow>,
     pub github: Option<GithubNow>,
     pub currency: Option<CurrencyNow>,
+    pub ai_usage: Vec<AiProviderStat>,
     pub remote_events: Vec<CalEvent>,
     pub self_cpu: f32,
     pub self_mem: u64,
@@ -327,9 +397,17 @@ pub struct Patch {
     pub display_mode: Option<String>,
     pub clock_24h: Option<bool>,
     pub launch_at_startup: Option<bool>,
+    pub icon_pack: Option<String>,
+    pub squircle_wrap: Option<bool>,
+    pub show_running_apps: Option<bool>,
+    pub dock_divider: Option<bool>,
+    pub native_blur: Option<bool>,
+    pub auto_pause_meeting: Option<bool>,
+    pub custom_icons: Option<HashMap<String, String>>,
     pub weather_query: Option<String>,
     pub github_token: Option<String>,
     pub ical_url: Option<String>,
+    pub deepseek_key: Option<String>,
     pub currency_from: Option<String>,
     pub currency_to: Option<String>,
     pub currency_amount: Option<f64>,
@@ -344,6 +422,8 @@ pub struct Patch {
     pub pomo_running: Option<bool>,
     pub pomo_focus_min: Option<u32>,
     pub pomo_break_min: Option<u32>,
+    pub pomo_round: Option<u32>,
+    pub pomo_total_rounds: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

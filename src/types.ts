@@ -38,10 +38,13 @@ export interface CalEvent {
   source: string;
 }
 
+export type DockStyle = "liquid-glass" | "glass" | "ios" | "midnight" | "black" | "white" | "clear";
+export type IconPack = "sequoia" | "dark" | "glass" | "native";
+
 export interface Config {
   version: number;
   firstLaunchComplete: boolean;
-  style: string;
+  style: DockStyle | string;
   accent: string;
   edge: "top" | "bottom";
   layout: "pill" | "full";
@@ -58,6 +61,13 @@ export interface Config {
   displayMode: "primary" | "follow";
   clock24h: boolean;
   launchAtStartup: boolean;
+  iconPack: IconPack | string;
+  squircleWrap: boolean;
+  showRunningApps: boolean;
+  dockDivider: boolean;
+  nativeBlur: boolean;
+  autoPauseMeeting: boolean;
+  customIcons: Record<string, string>;
   widgets: Widget[];
   pins: Pin[];
   groups: Group[];
@@ -67,6 +77,7 @@ export interface Config {
   weatherQuery: string;
   githubToken: string;
   icalUrl: string;
+  deepseekKey: string;
   currencyFrom: string;
   currencyTo: string;
   currencyAmount: number;
@@ -80,6 +91,8 @@ export interface Config {
   pomoRunning: boolean;
   pomoFocusMin: number;
   pomoBreakMin: number;
+  pomoRound: number;
+  pomoTotalRounds: number;
 }
 
 export interface AppEntry {
@@ -94,6 +107,28 @@ export interface RunningWindow {
   hwnd: number;
   exe: string;
   title: string;
+  name: string;
+  icon: string | null;
+}
+
+export interface AiProviderStat {
+  id: string;
+  name: string;
+  primaryLabel: string;
+  primaryPct: number;
+  primaryMeta: string;
+  secondaryLabel: string;
+  secondaryPct: number;
+  secondaryMeta: string;
+  model: string;
+  detail: string;
+  connected: boolean;
+}
+
+export interface WallpaperItem {
+  path: string;
+  name: string;
+  thumb: string;
 }
 
 export interface Snapshot {
@@ -109,11 +144,13 @@ export interface Snapshot {
   volume: number;
   muted: boolean;
   micMuted: boolean;
+  audioDevice: string;
   wifiOn: boolean | null;
   bluetoothOn: boolean | null;
   brightness: number | null;
   toastsEnabled: boolean | null;
   lightTheme: boolean;
+  wallpaperThumb: string | null;
   running: RunningWindow[];
   media: { title: string; artist: string; status: string; positionSec: number; durationSec: number } | null;
   disks: { name: string; mount: string; total: number; free: number }[];
@@ -130,14 +167,19 @@ export interface Snapshot {
     tempC: number;
     code: number;
     wind: number;
+    humidity: number;
+    precip: number;
     hi: number;
     lo: number;
+    sunrise: string;
+    sunset: string;
     hourly: { label: string; tempC: number; code: number }[];
     daily: { label: string; hi: number; lo: number; code: number }[];
     error: string | null;
   } | null;
   github: { login: string; total: number; streak: number; cells: number[]; error: string | null } | null;
   currency: { from: string; to: string; rate: number; amount: number; error: string | null } | null;
+  aiUsage: AiProviderStat[];
   remoteEvents: CalEvent[];
   selfCpu: number;
   selfMem: number;
@@ -155,35 +197,73 @@ export interface CatalogItem {
 }
 
 export const CATALOG: CatalogItem[] = [
-  { kind: "apps", name: "Apps", category: "Apps", blurb: "Start, pinned apps, and open windows." },
-  { kind: "search", name: "Search", category: "Apps", blurb: "Search the web, or open a folder path." },
-  { kind: "commands", name: "Commands", category: "Apps", blurb: "Type a name to launch an app or an action." },
-  { kind: "recycle", name: "Recycle Bin", category: "Apps", blurb: "What the bin holds, and a way to empty it." },
-  { kind: "storage", name: "Storage", category: "Apps", blurb: "Free space on each drive." },
-  { kind: "cpu", name: "CPU", category: "System", blurb: "Processor load as a ring." },
-  { kind: "ram", name: "Memory", category: "System", blurb: "Memory in use as a ring." },
-  { kind: "network", name: "Network", category: "System", blurb: "Download and upload speed." },
-  { kind: "top", name: "Top apps", category: "System", blurb: "The apps using the most CPU and memory." },
-  { kind: "battery", name: "Battery", category: "System", blurb: "Charge level and charging state." },
-  { kind: "brightness", name: "Brightness", category: "System", blurb: "Display brightness, when the panel exposes it." },
-  { kind: "quick", name: "Quick toggles", category: "System", blurb: "Wi-Fi, Bluetooth, theme, and notification toasts." },
-  { kind: "volume", name: "Volume", category: "Media", blurb: "Output volume. Scroll the tile to change it." },
-  { kind: "mic", name: "Microphone", category: "Media", blurb: "Mute the microphone." },
-  { kind: "now-playing", name: "Now playing", category: "Media", blurb: "The track reported to Windows, with play and skip." },
-  { kind: "clock", name: "Clock", category: "Clocks", blurb: "The time, with seconds." },
-  { kind: "date", name: "Date", category: "Clocks", blurb: "Today as a calendar page." },
-  { kind: "world-clock", name: "World clocks", category: "Clocks", blurb: "Three cities, with the local offset." },
-  { kind: "day-progress", name: "Day progress", category: "Clocks", blurb: "How much of today is behind you." },
-  { kind: "timer", name: "Timer", category: "Productivity", blurb: "A countdown you start from the bar." },
-  { kind: "stopwatch", name: "Stopwatch", category: "Productivity", blurb: "Start, pause, and reset." },
-  { kind: "pomodoro", name: "Focus", category: "Productivity", blurb: "Focus rounds and breaks." },
-  { kind: "todos", name: "To-dos", category: "Productivity", blurb: "The next open task, ticked from the dock." },
-  { kind: "notes", name: "Notes", category: "Productivity", blurb: "A note kept on this PC." },
-  { kind: "calendar", name: "Calendar", category: "Productivity", blurb: "Local events, plus an iCal link if you add one." },
-  { kind: "screen-time", name: "Screen Time", category: "Productivity", blurb: "Today, by hour and by app. Kept on this PC." },
-  { kind: "weather", name: "Weather", category: "Weather", blurb: "Temperature now, the next hours, and the next days." },
-  { kind: "github", name: "GitHub", category: "Developer", blurb: "Your contribution year, from a personal access token." },
-  { kind: "currency", name: "Currency", category: "Finance", blurb: "A live rate from the European Central Bank feed." },
+  { kind: "apps", name: "macOS App Dock", category: "Apps", blurb: "Launchpad, pinned apps, running Windows apps & Finder." },
+  { kind: "launchpad", name: "Launchpad", category: "Apps", blurb: "Full macOS app grid launcher in one click." },
+  { kind: "commands", name: "Spotlight", category: "Apps", blurb: "macOS-style command, math, and app launcher." },
+  { kind: "search", name: "Quick Search", category: "Apps", blurb: "Search the web or open any local Windows path." },
+  { kind: "recycle", name: "macOS Trash", category: "Apps", blurb: "macOS Trash bin icon with item count & empty action." },
+  { kind: "storage", name: "Storage", category: "Apps", blurb: "Free disk space bar across your Windows drives." },
+  { kind: "screenshot", name: "Capture Tools", category: "Apps", blurb: "Full screen, active window, and captures folder." },
+  { kind: "wallpaper", name: "Wallpaper", category: "Apps", blurb: "Live desktop wallpaper preview & switcher." },
+  { kind: "system-rings", name: "System Rings", category: "System", blurb: "Dual CPU & RAM circular gauges like LumaBar." },
+  { kind: "cpu", name: "CPU Ring", category: "System", blurb: "Live processor load circular gauge." },
+  { kind: "ram", name: "Memory Ring", category: "System", blurb: "Live RAM usage circular gauge." },
+  { kind: "network", name: "Network Speed", category: "System", blurb: "Live download/upload throughput & sparkline." },
+  { kind: "top", name: "Top Processes", category: "System", blurb: "Top CPU and RAM apps with Task Manager link." },
+  { kind: "battery", name: "Battery Wave", category: "System", blurb: "Liquid wave or squircle charge indicator." },
+  { kind: "brightness", name: "Brightness", category: "System", blurb: "Inline macOS Control Center brightness slider." },
+  { kind: "quick", name: "Control Center", category: "System", blurb: "Wi-Fi, Bluetooth, Dark Mode & Focus/Toasts pills." },
+  { kind: "volume", name: "Audio & Volume", category: "Media", blurb: "Active audio device name, mute & inline slider." },
+  { kind: "mic", name: "Microphone", category: "Media", blurb: "Instant system microphone mute toggle." },
+  { kind: "now-playing", name: "Now Playing", category: "Media", blurb: "Live Windows media session with inline play/skip." },
+  { kind: "today", name: "Today & Weather", category: "Clocks", blurb: "Date, live time & current weather in one bento tile." },
+  { kind: "clock", name: "Clock & Date", category: "Clocks", blurb: "Tabular clock with seconds and short date." },
+  { kind: "flip-clock", name: "Flip Clock", category: "Clocks", blurb: "Split-flap digital clock cards." },
+  { kind: "analog-clock", name: "Analog Clock", category: "Clocks", blurb: "Minimal dark macOS watch face with sweeping hand." },
+  { kind: "date", name: "Calendar Badge", category: "Clocks", blurb: "macOS-style red-header day calendar tile." },
+  { kind: "world-clock", name: "World Clocks", category: "Clocks", blurb: "Live cities and UTC offsets." },
+  { kind: "day-progress", name: "Day Dot Matrix", category: "Clocks", blurb: "Dot-matrix progress grid for today." },
+  { kind: "ai-limits", name: "AI Usage", category: "AI & Dev", blurb: "Local Claude, Codex & Gemini usage + DeepSeek balance." },
+  { kind: "github", name: "GitHub Activity", category: "AI & Dev", blurb: "Contribution heatmap & streak via local token." },
+  { kind: "pomodoro", name: "Focus Timer", category: "Productivity", blurb: "Red-accented 25m focus & break rounds with inline play." },
+  { kind: "timer", name: "Quick Timer", category: "Productivity", blurb: "Blue-bordered countdown with one-click play." },
+  { kind: "stopwatch", name: "Stopwatch", category: "Productivity", blurb: "Precision start, pause, and reset." },
+  { kind: "todos", name: "Reminders", category: "Productivity", blurb: "Inline checkable tasks & open count badge." },
+  { kind: "notes", name: "macOS Notes", category: "Productivity", blurb: "Notes app icon with live snippet & quick edit." },
+  { kind: "calendar", name: "Calendar", category: "Productivity", blurb: "Upcoming local & iCal events with meeting auto-pause." },
+  { kind: "screen-time", name: "Screen Time", category: "Productivity", blurb: "Hourly PC usage chart & top foreground apps." },
+  { kind: "weather", name: "Weather", category: "Weather", blurb: "Current temperature, icon & sky condition." },
+  { kind: "weather-details", name: "Weather Details", category: "Weather", blurb: "Wind, precipitation, and daily high/low range." },
+  { kind: "currency", name: "Currency", category: "Finance", blurb: "Live ECB exchange rate converter tile." },
+  { kind: "spacer", name: "Divider", category: "Apps", blurb: "Subtle macOS dock vertical separator." },
 ];
 
-export const CATEGORIES = ["Apps", "System", "Media", "Clocks", "Productivity", "Weather", "Developer", "Finance"];
+export const CATEGORIES = ["Apps", "System", "Media", "Clocks", "Productivity", "AI & Dev", "Weather", "Finance"];
+
+export const STYLE_OPTIONS: { id: DockStyle; name: string; swatch: string }[] = [
+  { id: "liquid-glass", name: "Liquid Glass", swatch: "linear-gradient(135deg, rgba(45,55,75,0.85), rgba(18,20,28,0.9))" },
+  { id: "glass", name: "macOS Dark", swatch: "rgba(22,24,30,0.86)" },
+  { id: "ios", name: "iOS Frosted", swatch: "rgba(242,244,248,0.86)" },
+  { id: "midnight", name: "Midnight", swatch: "rgba(8,11,20,0.92)" },
+  { id: "black", name: "Pure Black", swatch: "#141416" },
+  { id: "white", name: "Pure White", swatch: "#f5f5f7" },
+  { id: "clear", name: "Clear", swatch: "transparent" },
+];
+
+export const ICON_PACKS: { id: IconPack; name: string; desc: string }[] = [
+  { id: "sequoia", name: "macOS Sequoia", desc: "Vibrant Apple squircle icons" },
+  { id: "dark", name: "macOS Dark", desc: "Obsidian squircles with tinted glyphs" },
+  { id: "glass", name: "Tahoe Glass", desc: "Translucent liquid-glass squircles" },
+  { id: "native", name: "Windows Native", desc: "Original Windows app icons" },
+];
+
+export const ACCENT_PRESETS = [
+  "#0a84ff",
+  "#5e5ce6",
+  "#bf5af2",
+  "#ff375f",
+  "#ff453a",
+  "#ff9f0a",
+  "#30d158",
+  "#64d2ff",
+];

@@ -73,9 +73,17 @@ impl Store {
             }
             if let Some(v) = patch.clock_24h { cfg.clock_24h = v; }
             if let Some(v) = patch.launch_at_startup { cfg.launch_at_startup = v; }
+            if let Some(v) = patch.icon_pack { cfg.icon_pack = clean_icon_pack(&v); }
+            if let Some(v) = patch.squircle_wrap { cfg.squircle_wrap = v; }
+            if let Some(v) = patch.show_running_apps { cfg.show_running_apps = v; }
+            if let Some(v) = patch.dock_divider { cfg.dock_divider = v; }
+            if let Some(v) = patch.native_blur { cfg.native_blur = v; }
+            if let Some(v) = patch.auto_pause_meeting { cfg.auto_pause_meeting = v; }
+            if let Some(v) = patch.custom_icons { cfg.custom_icons = v; }
             if let Some(v) = patch.weather_query { cfg.weather_query = v.chars().take(80).collect(); }
             if let Some(v) = patch.github_token { cfg.github_token = v.trim().to_string(); }
             if let Some(v) = patch.ical_url { cfg.ical_url = sanitize_url(&v); }
+            if let Some(v) = patch.deepseek_key { cfg.deepseek_key = v.trim().to_string(); }
             if let Some(v) = patch.currency_from { cfg.currency_from = v.chars().take(6).collect(); }
             if let Some(v) = patch.currency_to { cfg.currency_to = v.chars().take(6).collect(); }
             if let Some(v) = patch.currency_amount { cfg.currency_amount = v.clamp(0.0, 1_000_000_000.0); }
@@ -90,6 +98,8 @@ impl Store {
             if let Some(v) = patch.pomo_running { cfg.pomo_running = v; }
             if let Some(v) = patch.pomo_focus_min { cfg.pomo_focus_min = v.clamp(1, 180); }
             if let Some(v) = patch.pomo_break_min { cfg.pomo_break_min = v.clamp(1, 60); }
+            if let Some(v) = patch.pomo_round { cfg.pomo_round = v.clamp(1, 12); }
+            if let Some(v) = patch.pomo_total_rounds { cfg.pomo_total_rounds = v.clamp(1, 12); }
             cfg.clone()
         })
     }
@@ -97,8 +107,15 @@ impl Store {
 
 fn clean_style(v: &str) -> String {
     match v {
-        "glass" | "ios" | "midnight" | "black" | "white" | "clear" => v.to_string(),
-        _ => "glass".into(),
+        "liquid-glass" | "glass" | "ios" | "midnight" | "black" | "white" | "clear" => v.to_string(),
+        _ => "liquid-glass".into(),
+    }
+}
+
+fn clean_icon_pack(v: &str) -> String {
+    match v {
+        "sequoia" | "dark" | "glass" | "native" => v.to_string(),
+        _ => "sequoia".into(),
     }
 }
 

@@ -4,11 +4,11 @@ Windocker is a macOS-inspired dock for Windows 10 and Windows 11. It sits on the
 
 ## Install
 
-Download the installer or the portable program from the [1.0.0 release](https://github.com/temidayoxyz/windocker/releases/tag/v1.0.0). The portable program uses the same settings as an installed copy and needs WebView2, which Windows 11 already has.
+Download the installer or the portable program from the [1.1.0 release](https://github.com/temidayoxyz/windocker/releases/tag/v1.1.0). The portable program uses the same settings as an installed copy and needs WebView2, which Windows 11 already has.
 
 The installer is a normal Windows setup program. You do not need Rust, Node.js, or any other developer tool.
 
-1. Run `Windocker_1.0.0_x64-setup.exe`.
+1. Run `Windocker_1.1.0_x64-setup.exe`.
 2. Launch Windocker. A short welcome card asks what to do with the Windows taskbar.
 3. Choose **Auto-hide taskbar**, **Hide taskbar**, or **Leave taskbar**, then press **Start**.
 
@@ -94,7 +94,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-The installer is written to `src-tauri\target\release\bundle\nsis\Windocker_1.0.0_x64-setup.exe`. The portable executable is `src-tauri\target\release\Windocker.exe`. Attach both files to the GitHub release instead of committing them.
+The installer is written to `src-tauri\target\release\bundle\nsis\Windocker_1.1.0_x64-setup.exe`. The portable executable is `src-tauri\target\release\Windocker.exe`. Attach both files to the GitHub release instead of committing them.
 
 Release builds use thin LTO, `opt-level = s`, and stripped symbols.
 
