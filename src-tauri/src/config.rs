@@ -93,7 +93,7 @@ impl Store {
                 }
             }
             if let Some(v) = patch.display_mode {
-                if v == "primary" || v == "follow" { cfg.display_mode = v; }
+                if matches!(v.as_str(), "primary" | "follow" | "all") { cfg.display_mode = v; }
             }
             if let Some(v) = patch.clock_24h { cfg.clock_24h = v; }
             if let Some(v) = patch.launch_at_startup { cfg.launch_at_startup = v; }

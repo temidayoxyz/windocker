@@ -167,6 +167,8 @@ export function Tile(props: {
   dragPin: React.MutableRefObject<string | null>;
   movePin: (from: string, to: string) => void;
   openMenu: (event: React.MouseEvent, items: MenuItem[]) => void;
+  onPreviewHover?: (title: string, windows: RunningWindow[]) => void;
+  onPreviewLeave?: () => void;
 }) {
   const { widget, config, snap, apps, netHistory, onOpen, onMenu, onCall, setPanel } = props;
   const common = { className: `tile ${widget.kind}`, onContextMenu: onMenu, onClick: onOpen };
@@ -284,6 +286,8 @@ export function Tile(props: {
               bouncing={bouncing === pin.id}
               onHover={() => setHoverIdx(itemIdx)}
               onBounce={() => triggerBounce(pin.id)}
+              onPreviewHover={props.onPreviewHover}
+              onPreviewLeave={props.onPreviewLeave}
             />
           );
         })}
@@ -301,9 +305,23 @@ export function Tile(props: {
                   className={`app-hit ${bouncing === win.exe ? "bounce" : ""}`}
                   data-label={config.showLabels ? (catalogMatch?.name || win.name) : undefined}
                   style={magFor(itemIdx)}
-                  onMouseEnter={() => setHoverIdx(itemIdx)}
-                  onClick={() => {
+                  onMouseEnter={() => {
+                    setHoverIdx(itemIdx);
+                    props.onPreviewHover?.(catalogMatch?.name || win.name, matches);
+                  }}
+                  onMouseLeave={() => props.onPreviewLeave?.()}
+                  onAuxClick={(e) => {
+                    if (e.button === 1 && matches.length > 0) {
+                      e.preventDefault();
+                      onCall("close_window", { hwnd: matches[0].hwnd });
+                    }
+                  }}
+                  onClick={(e) => {
                     triggerBounce(win.exe);
+                    if (e.shiftKey && catalogMatch) {
+                      onCall("launch_app", { id: catalogMatch.id });
+                      return;
+                    }
                     if (matches.length <= 1) onCall("activate_window", { hwnd: win.hwnd });
                     else setPanel(`exe:${fileOf(win.exe)}`);
                   }}
@@ -1062,6 +1080,8 @@ function PinButton(props: {
   bouncing: boolean;
   onHover: () => void;
   onBounce: () => void;
+  onPreviewHover?: (title: string, windows: RunningWindow[]) => void;
+  onPreviewLeave?: () => void;
 }) {
   const { pin, config, snap, apps, onCall, setPanel } = props;
   if (pin.type === "group") {
@@ -1091,14 +1111,30 @@ function PinButton(props: {
       className={`app-hit ${props.bouncing ? "bounce" : ""}`}
       data-label={config.showLabels ? app?.name || pin.id : undefined}
       style={props.magStyle}
-      onMouseEnter={props.onHover}
+      onMouseEnter={() => {
+        props.onHover();
+        if (windows.length > 0) {
+          props.onPreviewHover?.(app?.name || pin.id, windows);
+        }
+      }}
+      onMouseLeave={() => props.onPreviewLeave?.()}
+      onAuxClick={(e) => {
+        if (e.button === 1 && windows.length > 0) {
+          e.preventDefault();
+          onCall("close_window", { hwnd: windows[0].hwnd });
+        }
+      }}
       draggable
       onDragStart={() => props.onDragPin(pin.id)}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => { event.preventDefault(); props.onDropPin(pin.id); }}
-      onClick={() => {
+      onClick={(e) => {
         if (!app) return;
         props.onBounce();
+        if (e.shiftKey) {
+          onCall("launch_app", { id: app.id });
+          return;
+        }
         if (windows.length === 0) onCall("launch_app", { id: app.id });
         else if (windows.length === 1) onCall("activate_window", { hwnd: windows[0].hwnd });
         else setPanel(`windows:${app.id}`);

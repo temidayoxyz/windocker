@@ -58,7 +58,7 @@ export interface Config {
   previews: boolean;
   lockDock: boolean;
   taskbarMode: "untouched" | "autohide" | "hidden";
-  displayMode: "primary" | "follow";
+  displayMode: "primary" | "follow" | "all";
   clock24h: boolean;
   launchAtStartup: boolean;
   iconPack: IconPack | string;

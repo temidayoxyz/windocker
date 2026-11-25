@@ -49,6 +49,7 @@ struct Remote {
     paused_events: HashSet<String>,
 }
 
+#[derive(Clone)]
 struct Placement {
     css_w: f64,
     css_h: f64,
@@ -59,13 +60,27 @@ struct Placement {
     screen_h: f64,
 }
 
+impl Default for Placement {
+    fn default() -> Self {
+        Self {
+            css_w: 960.0,
+            css_h: 112.0,
+            collapsed: false,
+            fullscreen: false,
+            scale: 1.0,
+            screen_w: 1280.0,
+            screen_h: 720.0,
+        }
+    }
+}
+
 struct Core {
     store: Store,
     catalog: Mutex<Vec<AppEntry>>,
     preview: Mutex<Option<isize>>,
     screen: Mutex<ScreenDay>,
     remote: Mutex<Remote>,
-    placement: Mutex<Placement>,
+    placements: Mutex<HashMap<String, Placement>>,
     running: AtomicBool,
 }
 
@@ -177,14 +192,22 @@ fn hwnd_of(window: &WebviewWindow) -> Option<windows::Win32::Foundation::HWND> {
     Some(windows::Win32::Foundation::HWND(raw.0))
 }
 
+fn monitor_index_for(label: &str) -> Option<usize> {
+    label.strip_prefix("dock-").and_then(|s| s.parse::<usize>().ok())
+}
+
 fn monitor_box(
     window: &WebviewWindow,
-    follow: bool,
+    display_mode: &str,
 ) -> Option<(i32, i32, i32, i32, i32, i32, f64)> {
     let (cx, cy) = shell::cursor_pos();
     let monitors = window.available_monitors().ok()?;
     let primary = window.primary_monitor().ok().flatten();
-    let chosen = if follow {
+    let chosen = if let Some(idx) = monitor_index_for(window.label()) {
+        monitors.get(idx)
+    } else if display_mode == "all" {
+        primary.as_ref().or(monitors.first())
+    } else if display_mode == "follow" {
         monitors.iter().find(|m| {
             let p = m.position();
             let s = m.size();
@@ -225,14 +248,82 @@ fn apply_visuals(core: &Core, window: &WebviewWindow) {
     shell::apply_taskbar(TaskbarMode::parse(&cfg.taskbar_mode));
 }
 
-fn place(core: &Core, window: &WebviewWindow) {
+fn dock_windows(app: &AppHandle) -> Vec<WebviewWindow> {
+    app.webview_windows()
+        .into_iter()
+        .filter(|(label, _)| label == "main" || label.starts_with("dock-"))
+        .map(|(_, win)| win)
+        .collect()
+}
+
+fn sync_monitors(app: &AppHandle, core: &Arc<Core>) {
     let cfg = core.store.snapshot_config();
-    let mut placement = core.placement.lock().unwrap_or_else(|e| e.into_inner());
-    let Some((mx, my, mw, mh, _wx, work_h, scale)) =
-        monitor_box(window, cfg.display_mode == "follow")
-    else {
+    let Some(main_win) = app.get_webview_window("main") else {
         return;
     };
+    let monitors = main_win.available_monitors().unwrap_or_default();
+    let want_all = cfg.display_mode == "all" && monitors.len() > 1;
+
+    for (label, win) in app.webview_windows() {
+        if let Some(idx) = monitor_index_for(&label) {
+            if !want_all || idx >= monitors.len() {
+                let _ = win.hide();
+                let _ = win.close();
+            }
+        }
+    }
+
+    if want_all {
+        let primary = main_win.primary_monitor().ok().flatten();
+        let mut extra_idx = 0usize;
+        for m in &monitors {
+            let is_primary = primary
+                .as_ref()
+                .map(|p| p.position().x == m.position().x && p.position().y == m.position().y)
+                .unwrap_or(false);
+            if is_primary {
+                continue;
+            }
+            extra_idx += 1;
+            let mon_idx = monitors
+                .iter()
+                .position(|x| x.position().x == m.position().x && x.position().y == m.position().y)
+                .unwrap_or(extra_idx);
+            let label = format!("dock-{mon_idx}");
+            if app.get_webview_window(&label).is_none() {
+                if let Ok(win) = tauri::WebviewWindowBuilder::new(
+                    app,
+                    &label,
+                    tauri::WebviewUrl::App("index.html".into()),
+                )
+                .title("Windocker")
+                .transparent(true)
+                .decorations(false)
+                .shadow(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .resizable(false)
+                .visible(false)
+                .focused(false)
+                .inner_size(860.0, 96.0)
+                .build()
+                {
+                    let _ = win.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+                    apply_visuals(core, &win);
+                    place(core, &win);
+                }
+            }
+        }
+    }
+}
+
+fn place(core: &Core, window: &WebviewWindow) {
+    let cfg = core.store.snapshot_config();
+    let Some((mx, my, mw, mh, _wx, work_h, scale)) = monitor_box(window, &cfg.display_mode) else {
+        return;
+    };
+    let mut placements = core.placements.lock().unwrap_or_else(|e| e.into_inner());
+    let placement = placements.entry(window.label().to_string()).or_default();
     placement.scale = scale;
     placement.screen_w = mw as f64 / scale;
     placement.screen_h = mh as f64 / scale;
@@ -240,7 +331,6 @@ fn place(core: &Core, window: &WebviewWindow) {
         let _ = window.hide();
         return;
     }
-    let _ = window.show();
     let width = ((placement.css_w * scale).round() as i32).clamp(80, mw);
     let height = ((placement.css_h * scale).round() as i32).clamp(36, mh);
     let edge = cfg.edge_distance as f64 * scale;
@@ -260,9 +350,11 @@ fn place(core: &Core, window: &WebviewWindow) {
             my + mh - 4
         };
     }
+    drop(placements);
     if let Some(hwnd) = hwnd_of(window) {
         shell::place_window(hwnd, x, y, width, height);
     } else {
+        let _ = window.show();
         let _ = window.set_size(tauri::PhysicalSize::new(width as u32, height as u32));
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
@@ -318,15 +410,10 @@ pub fn run() {
                     wallpaper_thumb: None,
                     paused_events: HashSet::new(),
                 }),
-                placement: Mutex::new(Placement {
-                    css_w: 960.0,
-                    css_h: 112.0,
-                    collapsed: false,
-                    fullscreen: false,
-                    scale: 1.0,
-                    screen_w: 1280.0,
-                    screen_h: 720.0,
-                }),
+                placements: Mutex::new(HashMap::from([(
+                    "main".to_string(),
+                    Placement::default(),
+                )])),
                 running: AtomicBool::new(true),
             });
             if let Some(window) = app.get_webview_window("main") {
@@ -334,6 +421,7 @@ pub fn run() {
                 apply_visuals(&core, &window);
                 place(&core, &window);
             }
+            sync_monitors(app.handle(), &core);
             let fallback_icon = [10u8, 132, 255, 255].repeat(16 * 16);
             let tray_icon = app
                 .default_window_icon()
@@ -370,13 +458,13 @@ pub fn run() {
                         let _ = app.emit("open-settings", ());
                     }
                     "quit" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.hide();
+                        for win in dock_windows(app) {
+                            let _ = win.hide();
                         }
                         if let Some(state) = app.try_state::<Arc<Core>>() {
                             state.running.store(false, Ordering::SeqCst);
                         }
-                        shell::restore_taskbar();
+                        std::thread::spawn(|| shell::restore_taskbar());
                         app.exit(0);
                     }
                     _ => {}
@@ -411,14 +499,18 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-                let app = window.app_handle();
-                if let Some(state) = app.try_state::<Arc<Core>>() {
-                    state.running.store(false, Ordering::SeqCst);
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let app = window.app_handle();
+                    for win in dock_windows(app) {
+                        let _ = win.hide();
+                    }
+                    if let Some(state) = app.try_state::<Arc<Core>>() {
+                        state.running.store(false, Ordering::SeqCst);
+                    }
+                    std::thread::spawn(|| shell::restore_taskbar());
+                    app.exit(0);
                 }
-                shell::restore_taskbar();
-                app.exit(0);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -519,8 +611,10 @@ fn poll(app: AppHandle, core: Arc<Core>) {
         let fullscreen = our
             .map(|hwnd| shell::foreground_is_borderless_fullscreen(hwnd))
             .unwrap_or(false);
+        let mut need_place = false;
         {
-            let mut placement = core.placement.lock().unwrap_or_else(|e| e.into_inner());
+            let mut placements = core.placements.lock().unwrap_or_else(|e| e.into_inner());
+            let placement = placements.entry("main".to_string()).or_default();
             let was = placement.fullscreen;
             placement.fullscreen = fullscreen;
             if cfg.auto_hide && !fullscreen {
@@ -545,13 +639,19 @@ fn poll(app: AppHandle, core: Arc<Core>) {
             } else if !cfg.auto_hide {
                 placement.collapsed = false;
             }
-            let changed = was != placement.fullscreen || cfg.auto_hide;
-            drop(placement);
-            if changed {
-                if let Some(window) = &window {
-                    place(&core, window);
+            need_place = was != placement.fullscreen || cfg.auto_hide || cfg.display_mode == "follow";
+        }
+        if need_place && core.running.load(Ordering::Relaxed) {
+            let app_place = app.clone();
+            let core_place = core.clone();
+            let _ = app.run_on_main_thread(move || {
+                if !core_place.running.load(Ordering::Relaxed) {
+                    return;
                 }
-            }
+                for win in dock_windows(&app_place) {
+                    place(&core_place, &win);
+                }
+            });
         }
         if tick % 12 == 0 && !fullscreen {
             refresh_remote(&core, &cfg);
@@ -578,13 +678,11 @@ fn poll(app: AppHandle, core: Arc<Core>) {
             shell::ensure_taskbar_hidden();
         }
         if tick % 5 == 0 && !fullscreen && core.running.load(Ordering::Relaxed) {
-            if let Some(window) = &window {
-                if audio.is_none() {
-                    audio = shell::Audio::open().ok();
-                }
-                let snap = build_snapshot(&core, &mut metrics, &cfg, audio.as_ref());
-                let _ = window.emit("snapshot", snap);
+            if audio.is_none() {
+                audio = shell::Audio::open().ok();
             }
+            let snap = build_snapshot(&core, &mut metrics, &cfg, audio.as_ref());
+            let _ = app.emit("snapshot", snap);
         }
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -722,7 +820,8 @@ fn build_snapshot(
     screen_apps.sort_by(|a, b| b.seconds.cmp(&a.seconds));
     screen_apps.truncate(8);
     let remote = core.remote.lock().unwrap_or_else(|e| e.into_inner());
-    let placement = core.placement.lock().unwrap_or_else(|e| e.into_inner());
+    let placements = core.placements.lock().unwrap_or_else(|e| e.into_inner());
+    let placement = placements.get("main").cloned().unwrap_or_default();
     Snapshot {
         now_ms: now_ms(),
         cpu,
@@ -808,17 +907,20 @@ fn patch_config(app: AppHandle, core: State<Arc<Core>>, patch: Patch) -> Config 
             let _ = auto.disable();
         }
     }
-    if let Some(window) = app.get_webview_window("main") {
-        apply_visuals(&core, &window);
-        place(&core, &window);
+    sync_monitors(&app, &core);
+    for win in dock_windows(&app) {
+        apply_visuals(&core, &win);
+        place(&core, &win);
     }
+    let _ = app.emit("config", &cfg);
     cfg
 }
 
 #[tauri::command]
-fn fit_window(app: AppHandle, core: State<Arc<Core>>, width: f64, height: f64) {
+fn fit_window(window: WebviewWindow, core: State<Arc<Core>>, width: f64, height: f64) {
     {
-        let mut placement = core.placement.lock().unwrap_or_else(|e| e.into_inner());
+        let mut placements = core.placements.lock().unwrap_or_else(|e| e.into_inner());
+        let placement = placements.entry(window.label().to_string()).or_default();
         let next_w = width.clamp(40.0, 4000.0);
         let next_h = height.clamp(24.0, 1200.0);
         if (next_w - placement.css_w).abs() < 4.0 && (next_h - placement.css_h).abs() < 4.0 {
@@ -827,22 +929,23 @@ fn fit_window(app: AppHandle, core: State<Arc<Core>>, width: f64, height: f64) {
         placement.css_w = next_w;
         placement.css_h = next_h;
     }
-    if let Some(window) = app.get_webview_window("main") {
-        place(&core, &window);
-    }
+    place(&core, &window);
 }
 
 #[tauri::command]
-fn set_regions(app: AppHandle, core: State<Arc<Core>>, rects: Vec<RoundRect>) {
-    let Some(window) = app.get_webview_window("main") else {
-        return;
-    };
+fn set_regions(window: WebviewWindow, core: State<Arc<Core>>, rects: Vec<RoundRect>) {
     let Some(hwnd) = hwnd_of(&window) else { return };
     if !core.store.snapshot_config().native_blur {
         shell::set_round_regions(hwnd, &[]);
         return;
     }
-    let scale = core.placement.lock().unwrap_or_else(|e| e.into_inner()).scale;
+    let scale = core
+        .placements
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(window.label())
+        .map(|p| p.scale)
+        .unwrap_or(1.0);
     let mapped: Vec<(i32, i32, i32, i32, i32)> = rects
         .into_iter()
         .map(|r| {
@@ -1053,27 +1156,34 @@ fn rename_group(core: State<Arc<Core>>, id: String, name: String) -> Config {
 }
 
 #[tauri::command]
-fn launch_app(core: State<Arc<Core>>, id: String) -> Result<(), String> {
+async fn launch_app(core: State<'_, Arc<Core>>, id: String) -> Result<(), String> {
     let Some(app) = find_app(&core, &id) else {
         return Err("That app is not on this PC.".into());
     };
-    apps::launch(&app);
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || apps::launch(&app))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn activate_window(hwnd: i64) -> Result<(), String> {
-    apps::activate(hwnd)
+async fn activate_window(hwnd: i64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || apps::activate(hwnd))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn close_window(hwnd: i64) -> Result<(), String> {
-    apps::close_window(hwnd)
+async fn close_window(hwnd: i64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || apps::close_window(hwnd))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn end_task(hwnd: i64) -> Result<(), String> {
-    apps::end_task(hwnd)
+async fn end_task(hwnd: i64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || apps::end_task(hwnd))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1103,13 +1213,19 @@ fn media(command: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_brightness(value: u32) -> Result<(), String> {
-    system::set_brightness(value)
+async fn set_brightness(value: u32) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || system::set_brightness(value))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn toggle_radio(kind: String) -> Result<(), String> {
-    match system::toggle_radio(&kind) {
+async fn toggle_radio(kind: String) -> Result<(), String> {
+    let k = kind.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || system::toggle_radio(&k))
+        .await
+        .map_err(|e| e.to_string())?;
+    match res {
         Ok(()) => Ok(()),
         Err(err) => {
             shell::open_url(if kind == "bluetooth" {
@@ -1134,34 +1250,44 @@ fn toggle_toasts() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn empty_recycle() -> Result<(), String> {
-    shell::empty_recycle()
+async fn empty_recycle() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(shell::empty_recycle)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn search(query: String) -> Result<(), String> {
-    let query = query.trim();
-    if query.is_empty() {
-        return Ok(());
-    }
-    let path = std::path::Path::new(query);
-    if path.exists() {
-        shell::open_path(query);
-    } else {
-        let encoded = query.replace(' ', "+");
-        shell::open_url(&format!("https://www.google.com/search?q={encoded}"));
-    }
-    Ok(())
+async fn search(query: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(());
+        }
+        let path = std::path::Path::new(query);
+        if path.exists() {
+            shell::open_path(query);
+        } else {
+            let encoded = query.replace(' ', "+");
+            shell::open_url(&format!("https://www.google.com/search?q={encoded}"));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn screenshot(mode: String) -> Result<String, String> {
-    let path = if mode == "window" {
-        shell::capture_foreground()?
-    } else {
-        shell::capture_virtual_screen()?
-    };
-    Ok(path.display().to_string())
+async fn screenshot(mode: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = if mode == "window" {
+            shell::capture_foreground()?
+        } else {
+            shell::capture_virtual_screen()?
+        };
+        Ok(path.display().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1195,20 +1321,31 @@ fn open_start() {
 }
 
 #[tauri::command]
-fn list_wallpapers() -> Vec<WallpaperItem> {
-    shell::list_wallpapers()
-        .into_iter()
-        .filter_map(|(path, name)| {
-            shell::thumbnail_data_url(&path, 120).map(|thumb| WallpaperItem { path, name, thumb })
-        })
-        .collect()
+async fn list_wallpapers() -> Vec<WallpaperItem> {
+    tauri::async_runtime::spawn_blocking(|| {
+        shell::list_wallpapers()
+            .into_iter()
+            .filter_map(|(path, name)| {
+                shell::thumbnail_data_url(&path, 120)
+                    .map(|thumb| WallpaperItem { path, name, thumb })
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
-fn set_wallpaper(core: State<Arc<Core>>, path: String) -> Result<(), String> {
-    shell::set_wallpaper(&path)?;
+async fn set_wallpaper(core: State<'_, Arc<Core>>, path: String) -> Result<(), String> {
+    let p = path.clone();
+    let thumb = tauri::async_runtime::spawn_blocking(move || {
+        shell::set_wallpaper(&p)?;
+        Ok::<Option<String>, String>(shell::thumbnail_data_url(&p, 72))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let mut remote = core.remote.lock().unwrap_or_else(|e| e.into_inner());
-    remote.wallpaper_thumb = shell::thumbnail_data_url(&path, 72);
+    remote.wallpaper_thumb = thumb;
     remote.wallpaper_path = path;
     Ok(())
 }
@@ -1303,27 +1440,33 @@ fn chime() {
 
 #[tauri::command]
 fn quit(app: AppHandle, core: State<Arc<Core>>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
+    for win in dock_windows(&app) {
+        let _ = win.hide();
     }
     core.running.store(false, Ordering::SeqCst);
-    shell::restore_taskbar();
+    std::thread::spawn(|| shell::restore_taskbar());
     app.exit(0);
 }
 
 #[tauri::command]
-fn list_wifi_networks() -> Vec<model::WifiNetwork> {
-    system::list_wifi_networks()
+async fn list_wifi_networks() -> Vec<model::WifiNetwork> {
+    tauri::async_runtime::spawn_blocking(system::list_wifi_networks)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-fn connect_wifi(ssid: String) -> Result<(), String> {
-    system::connect_wifi(&ssid)
+async fn connect_wifi(ssid: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || system::connect_wifi(&ssid))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn list_bluetooth_devices() -> Vec<model::BluetoothDevice> {
-    system::list_bluetooth_devices()
+async fn list_bluetooth_devices() -> Vec<model::BluetoothDevice> {
+    tauri::async_runtime::spawn_blocking(system::list_bluetooth_devices)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1338,7 +1481,7 @@ fn open_quick_settings(kind: String) {
 
 #[tauri::command]
 fn preview_window(
-    app: AppHandle,
+    window: WebviewWindow,
     core: State<Arc<Core>>,
     hwnd: i64,
     x: f64,
@@ -1346,13 +1489,16 @@ fn preview_window(
     w: f64,
     h: f64,
 ) -> Result<(), String> {
-    let Some(window) = app.get_webview_window("main") else {
-        return Ok(());
-    };
     let Some(dest) = hwnd_of(&window) else {
         return Ok(());
     };
-    let scale = core.placement.lock().unwrap_or_else(|e| e.into_inner()).scale;
+    let scale = core
+        .placements
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(window.label())
+        .map(|p| p.scale)
+        .unwrap_or(1.0);
     clear_preview_inner(&core);
     let rect = windows::Win32::Foundation::RECT {
         left: (x * scale) as i32,

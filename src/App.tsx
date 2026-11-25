@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LaunchpadModal, Picker, Settings, Welcome, WidgetCard } from "./components/Panels";
 import { Tile, remain, type MenuItem } from "./components/Widgets";
-import type { AppEntry, Config, Snapshot } from "./types";
+import type { AppEntry, Config, RunningWindow, Snapshot } from "./types";
 
 const emptySnap = (): Snapshot => ({
   nowMs: Date.now(),
@@ -65,6 +65,7 @@ export default function App() {
   const [snap, setSnap] = useState<Snapshot>(emptySnap);
   const [panel, setPanel] = useState<"welcome" | "picker" | "settings" | "launchpad" | string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [preview, setPreview] = useState<{ title: string; windows: RunningWindow[] } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [category, setCategory] = useState("All");
@@ -73,6 +74,53 @@ export default function App() {
   const netRef = useRef<number[]>(Array(24).fill(0));
   const chimed = useRef<number | null>(null);
   const dragPin = useRef<string | null>(null);
+  const showPrevTimer = useRef<number | null>(null);
+  const hidePrevTimer = useRef<number | null>(null);
+
+  const clearPreviewTimers = () => {
+    if (showPrevTimer.current != null) {
+      window.clearTimeout(showPrevTimer.current);
+      showPrevTimer.current = null;
+    }
+    if (hidePrevTimer.current != null) {
+      window.clearTimeout(hidePrevTimer.current);
+      hidePrevTimer.current = null;
+    }
+  };
+
+  const closePreviewNow = () => {
+    clearPreviewTimers();
+    setPreview(null);
+    invoke("clear_preview").catch(() => undefined);
+  };
+
+  const onPreviewHover = (title: string, windows: RunningWindow[]) => {
+    if (!config?.previews || panel || windows.length === 0) return;
+    if (hidePrevTimer.current != null) {
+      window.clearTimeout(hidePrevTimer.current);
+      hidePrevTimer.current = null;
+    }
+    if (preview) {
+      setPreview({ title, windows });
+      return;
+    }
+    if (showPrevTimer.current != null) window.clearTimeout(showPrevTimer.current);
+    showPrevTimer.current = window.setTimeout(() => {
+      setPreview({ title, windows });
+    }, 260);
+  };
+
+  const onPreviewLeave = () => {
+    if (showPrevTimer.current != null) {
+      window.clearTimeout(showPrevTimer.current);
+      showPrevTimer.current = null;
+    }
+    if (hidePrevTimer.current != null) window.clearTimeout(hidePrevTimer.current);
+    hidePrevTimer.current = window.setTimeout(() => {
+      setPreview(null);
+      invoke("clear_preview").catch(() => undefined);
+    }, 140);
+  };
 
   const fail = (error: unknown) => setToast(error instanceof Error ? error.message : String(error));
   const call = async (cmd: string, args?: Record<string, unknown>) => {
@@ -160,7 +208,7 @@ export default function App() {
     ro.observe(el);
     send();
     return () => ro.disconnect();
-  }, [config?.style, config?.layout, config?.edge, config?.widgets.length, config?.pins.length, config?.nativeBlur, panel, menu]);
+  }, [config?.style, config?.layout, config?.edge, config?.widgets.length, config?.pins.length, config?.nativeBlur, panel, menu, preview]);
 
   useEffect(() => {
     if (!toast) return;
@@ -306,6 +354,27 @@ export default function App() {
           }}
         />
       )}
+      {preview && !panel && (
+        <WindowPreviewPop
+          title={preview.title}
+          windows={preview.windows}
+          onEnter={() => {
+            if (hidePrevTimer.current != null) {
+              window.clearTimeout(hidePrevTimer.current);
+              hidePrevTimer.current = null;
+            }
+          }}
+          onLeave={onPreviewLeave}
+          onActivate={(hwnd) => {
+            call("activate_window", { hwnd });
+            closePreviewNow();
+          }}
+          onCloseWin={(hwnd) => {
+            call("close_window", { hwnd });
+            closePreviewNow();
+          }}
+        />
+      )}
       <div className="pill" ref={pillRef}>
         {config.widgets.map((widget) => (
           <Tile
@@ -330,6 +399,8 @@ export default function App() {
             dragPin={dragPin}
             movePin={movePin}
             openMenu={onMenu}
+            onPreviewHover={onPreviewHover}
+            onPreviewLeave={onPreviewLeave}
           />
         ))}
       </div>
@@ -357,6 +428,78 @@ export default function App() {
         </div>
       )}
       {toast && <div className="toast">{toast}</div>}
+    </div>
+  );
+}
+
+function WindowPreviewPop({
+  title,
+  windows,
+  onEnter,
+  onLeave,
+  onActivate,
+  onCloseWin,
+}: {
+  title: string;
+  windows: RunningWindow[];
+  onEnter: () => void;
+  onLeave: () => void;
+  onActivate: (hwnd: number) => void;
+  onCloseWin: (hwnd: number) => void;
+}) {
+  const [idx, setIdx] = useState(0);
+  const boxRef = useRef<HTMLButtonElement>(null);
+  const active = windows[Math.min(idx, windows.length - 1)];
+
+  useEffect(() => {
+    setIdx(0);
+  }, [title]);
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || !active) return;
+    const frame = requestAnimationFrame(() => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 20 && r.height > 20) {
+        invoke("preview_window", {
+          hwnd: active.hwnd,
+          x: r.left,
+          y: r.top,
+          w: r.width,
+          h: r.height,
+        }).catch(() => undefined);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active?.hwnd]);
+
+  if (!active) return null;
+
+  return (
+    <div className="card win-preview-pop" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <div className="win-preview-head">
+        <span className="tiny-bold truncate">{active.title || title}</span>
+        <button className="x" onClick={() => onCloseWin(active.hwnd)} title="Close window">×</button>
+      </div>
+      {windows.length > 1 && (
+        <div className="win-preview-tabs">
+          {windows.slice(0, 4).map((w, i) => (
+            <button
+              key={w.hwnd}
+              className={`win-tab ${i === idx ? "on" : ""}`}
+              onClick={() => setIdx(i)}
+            >
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        ref={boxRef}
+        className="win-preview-box"
+        onClick={() => onActivate(active.hwnd)}
+        title="Click to focus window"
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 [package]
 name = "windocker"
-version = "1.1.1"
+version = "1.2.0"
 description = "Windocker is a lightweight macOS-inspired dock for Windows."
 authors = ["Windocker"]
 edition = "2021"

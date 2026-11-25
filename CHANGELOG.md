@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0
+
+Multi-Monitor & Window Engine update, plus non-blocking async architecture:
+
+- **Non-Blocking Async Architecture**: Moved blocking Windows API, Wi-Fi/Bluetooth, brightness, wallpaper, and app-launch commands off the main UI thread (`spawn_blocking`), dispatched background placement onto the main thread (`run_on_main_thread`), and fixed quit/teardown so Windocker never triggers Windows "Not Responding" Ghost Windows.
+- **Per-Monitor Dock Instances (`All Monitors`)**: Added **All Monitors** mode in System Settings → Dock & Taskbar to spawn an independent synchronized dock on every connected display.
+- **DWM Live Window Thumbnail Previews**: Hovering any running app icon displays a live hardware-accelerated DWM thumbnail preview card with window title, multi-window switcher tabs, click-to-focus, and quick close.
+- **Middle-Click Close & Shift+Click New Instance**: Middle-click any running app icon on the dock to close its window; Shift+click any pinned or running app to launch a new instance.
+
 ## 1.1.1
 
 Quality-of-life, multi-monitor, icon accuracy, and stability hotfix for 1.1.0:

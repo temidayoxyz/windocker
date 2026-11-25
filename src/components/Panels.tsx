@@ -212,6 +212,7 @@ export function Settings(props: {
           <Toggle label="Show macOS divider lines" on={config.dockDivider} set={(v) => onPatch({ dockDivider: v })} />
           <Toggle label="Cursor magnification wave" on={config.magnification} set={(v) => onPatch({ magnification: v })} />
           <Toggle label="Hover icon labels" on={config.showLabels} set={(v) => onPatch({ showLabels: v })} />
+          <Toggle label="Live window hover previews" on={config.previews} set={(v) => onPatch({ previews: v })} />
         </div>
       )}
 
@@ -220,7 +221,7 @@ export function Settings(props: {
           <div className="set-row"><span>Screen Edge</span><div className="seg"><button className={config.edge === "bottom" ? "on" : ""} onClick={() => onPatch({ edge: "bottom" })}>Bottom</button><button className={config.edge === "top" ? "on" : ""} onClick={() => onPatch({ edge: "top" })}>Top</button></div></div>
           <div className="set-row"><span>Bar Shape</span><div className="seg"><button className={config.layout === "pill" ? "on" : ""} onClick={() => onPatch({ layout: "pill" })}>Floating Pill</button><button className={config.layout === "full" ? "on" : ""} onClick={() => onPatch({ layout: "full" })}>Full Width</button></div></div>
           <div className="set-row"><span>Windows Taskbar</span><div className="seg">{(["untouched", "autohide", "hidden"] as const).map((mode) => <button key={mode} className={config.taskbarMode === mode ? "on" : ""} onClick={() => onPatch({ taskbarMode: mode })}>{mode === "untouched" ? "Leave" : mode === "autohide" ? "Auto-hide" : "Replace"}</button>)}</div></div>
-          <div className="set-row"><span>Monitor</span><div className="seg"><button className={config.displayMode === "primary" ? "on" : ""} onClick={() => onPatch({ displayMode: "primary" })}>Primary</button><button className={config.displayMode === "follow" ? "on" : ""} onClick={() => onPatch({ displayMode: "follow" })}>Follow Pointer</button></div></div>
+          <div className="set-row"><span>Monitor</span><div className="seg"><button className={config.displayMode === "primary" ? "on" : ""} onClick={() => onPatch({ displayMode: "primary" })}>Primary</button><button className={config.displayMode === "follow" ? "on" : ""} onClick={() => onPatch({ displayMode: "follow" })}>Follow Pointer</button><button className={config.displayMode === "all" ? "on" : ""} onClick={() => onPatch({ displayMode: "all" })}>All Monitors</button></div></div>
           <Toggle label="Auto-hide Dock" on={config.autoHide} set={(v) => onPatch({ autoHide: v })} />
           <Toggle label="24-hour clock" on={config.clock24h} set={(v) => onPatch({ clock24h: v })} />
           <Toggle label="Launch at Windows startup" on={config.launchAtStartup} set={(v) => onPatch({ launchAtStartup: v })} />
