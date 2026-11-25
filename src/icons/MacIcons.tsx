@@ -14,6 +14,7 @@ export const MAC_ICON_KEYS = [
   { key: "mail", label: "Mail" },
   { key: "calculator", label: "Calculator" },
   { key: "messages", label: "Messages" },
+  { key: "telegram", label: "Telegram" },
   { key: "discord", label: "Discord" },
   { key: "chrome", label: "Chrome" },
   { key: "firefox", label: "Firefox" },
@@ -25,21 +26,24 @@ export function resolveMacIconKey(app?: Pick<AppEntry, "id" | "name" | "exe">, c
   if (!app) return null;
   const custom = customIcons?.[app.id];
   if (custom && custom !== "auto") return custom;
+  const exeFile = (app.exe.split(/[/\\]/).pop() || "").toLowerCase();
+  const nameLower = app.name.toLowerCase();
   const hay = `${app.name} ${app.exe} ${app.id}`.toLowerCase();
-  if (hay.includes("explorer.exe") || hay.includes("file explorer") || app.id === "explorer") return "finder";
-  if (hay.includes("msedge") || hay.includes("microsoft edge") || hay.includes("safari")) return "safari";
+  if (exeFile === "explorer.exe" || nameLower === "file explorer" || app.id === "explorer") return "finder";
+  if (exeFile === "msedge.exe" || hay.includes("microsoft edge") || nameLower === "safari") return "safari";
   if (hay.includes("chrome")) return "chrome";
   if (hay.includes("firefox")) return "firefox";
-  if (hay.includes("windows terminal") || hay.includes("wt.exe") || hay.includes("powershell") || hay.includes("cmd.exe") || hay.includes("git bash") || hay.includes("hyper") || hay.includes("wezterm") || hay.includes("alacritty")) return "terminal";
+  if (hay.includes("windows terminal") || exeFile === "wt.exe" || exeFile === "powershell.exe" || exeFile === "pwsh.exe" || exeFile === "cmd.exe" || hay.includes("git bash") || hay.includes("wezterm") || hay.includes("alacritty")) return "terminal";
   if (hay.includes("notepad") || hay.includes("obsidian") || hay.includes("notion") || hay.includes("onenote")) return "notes";
-  if (hay.includes("systemsettings") || hay.includes("ms-settings") || hay === "settings" || hay.includes("control panel")) return "settings";
-  if (hay.includes("taskmgr") || hay.includes("task manager") || hay.includes("activity monitor")) return "activity";
-  if (hay.includes("code.exe") || hay.includes("visual studio code") || hay.includes("cursor") || hay.includes("intellij") || hay.includes("idea64") || hay.includes("android studio")) return "vscode";
+  if (exeFile === "systemsettings.exe" || hay.includes("ms-settings") || nameLower === "settings" || hay.includes("control panel")) return "settings";
+  if (exeFile === "taskmgr.exe" || hay.includes("task manager") || hay.includes("activity monitor")) return "activity";
+  if (exeFile === "code.exe" || exeFile === "code - insiders.exe" || nameLower.includes("visual studio code") || exeFile === "cursor.exe" || exeFile === "idea64.exe") return "vscode";
   if (hay.includes("spotify") || hay.includes("apple music") || hay.includes("vlc") || hay.includes("itunes") || hay.includes("media player")) return "music";
   if (hay.includes("photos")) return "photos";
-  if (hay.includes("outlook") || hay.includes("thunderbird") || hay.includes("mail")) return "mail";
-  if (hay.includes("calc")) return "calculator";
-  if (hay.includes("whatsapp") || hay.includes("telegram") || hay.includes("slack") || hay.includes("teams") || hay.includes("messages")) return "messages";
+  if (hay.includes("outlook") || hay.includes("thunderbird") || nameLower === "mail") return "mail";
+  if (exeFile === "calc.exe" || exeFile === "calculatorapp.exe" || nameLower === "calculator") return "calculator";
+  if (hay.includes("telegram")) return "telegram";
+  if (hay.includes("whatsapp") || hay.includes("slack") || hay.includes("teams") || nameLower === "messages") return "messages";
   if (hay.includes("discord")) return "discord";
   if (hay.includes("docker")) return "docker";
   if (hay.includes("github")) return "github";
@@ -263,6 +267,18 @@ export function MacPackGlyph({ iconKey, pack }: { iconKey: string; pack: IconPac
         </MacSquircleShell>
       );
 
+    case "telegram":
+      return (
+        <MacSquircleShell pack={pack} bg="linear-gradient(180deg, #37aee2 0%, #1e96c8 100%)">
+          <svg viewBox="0 0 64 64" className="mac-svg">
+            <path
+              d="M49 17 L13 31 C11 31.8 11 34 13.2 34.7 L22.5 37.6 L43 24.5 C44 23.9 44.8 24.4 44.1 25.1 L27.6 40.1 L26.9 48.2 C27.9 48.2 28.4 47.7 29 47.1 L33.6 42.6 L43 49.5 C44.7 50.5 46 50 46.4 47.9 L51.4 19.6 C51.9 17.3 50.6 16.3 49 17 Z"
+              fill={darkTint ? "#38bdf8" : "#ffffff"}
+            />
+          </svg>
+        </MacSquircleShell>
+      );
+
     case "discord":
       return (
         <MacSquircleShell pack={pack} bg="linear-gradient(180deg, #6d78ff 0%, #4e56d6 100%)">
@@ -328,18 +344,24 @@ export function MacPackGlyph({ iconKey, pack }: { iconKey: string; pack: IconPac
 }
 
 export function LaunchpadIcon({ pack }: { pack: IconPack | string }) {
-  const colors = [
-    "#ff5f57", "#ff9f0a", "#ffd60a",
-    "#30d158", "#64d2ff", "#0a84ff",
-    "#5e5ce6", "#bf5af2", "#ff375f",
-  ];
+  const isDark = pack === "dark";
   return (
-    <MacSquircleShell pack={pack} bg="linear-gradient(180deg, #f2f4f8 0%, #cfd5e0 100%)">
-      <div className="launchpad-grid">
-        {colors.map((c, i) => (
-          <span key={i} style={{ background: pack === "dark" ? "rgba(255,255,255,0.82)" : c }} />
-        ))}
-      </div>
+    <MacSquircleShell
+      pack={pack}
+      bg={isDark ? "#18191f" : "linear-gradient(180deg, #f4f7fc 0%, #dce4f2 100%)"}
+    >
+      <svg viewBox="0 0 64 64" className="mac-svg">
+        <defs>
+          <linearGradient id="win11Blue" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#4cc2ff" />
+            <stop offset="100%" stopColor="#0078d4" />
+          </linearGradient>
+        </defs>
+        <rect x="13" y="13" width="17.5" height="17.5" rx="3" fill="url(#win11Blue)" />
+        <rect x="33.5" y="13" width="17.5" height="17.5" rx="3" fill="url(#win11Blue)" opacity="0.92" />
+        <rect x="13" y="33.5" width="17.5" height="17.5" rx="3" fill="url(#win11Blue)" opacity="0.92" />
+        <rect x="33.5" y="33.5" width="17.5" height="17.5" rx="3" fill="url(#win11Blue)" opacity="0.84" />
+      </svg>
     </MacSquircleShell>
   );
 }

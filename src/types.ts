@@ -131,6 +131,20 @@ export interface WallpaperItem {
   thumb: string;
 }
 
+export interface WifiNetwork {
+  ssid: string;
+  signal: number;
+  security: string;
+  connected: boolean;
+}
+
+export interface BluetoothDevice {
+  name: string;
+  address: string;
+  connected: boolean;
+  paired: boolean;
+}
+
 export interface Snapshot {
   nowMs: number;
   cpu: number;

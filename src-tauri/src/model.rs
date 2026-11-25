@@ -124,7 +124,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             first_launch_complete: false,
             style: "liquid-glass".into(),
             accent: "#0a84ff".into(),
@@ -133,13 +133,13 @@ impl Default for Config {
             scale: 1.0,
             spacing: 8,
             padding: 7,
-            edge_distance: 10,
+            edge_distance: 4,
             auto_hide: false,
             magnification: true,
             show_labels: true,
             previews: true,
             lock_dock: false,
-            taskbar_mode: "autohide".into(),
+            taskbar_mode: "hidden".into(),
             display_mode: "primary".into(),
             clock_24h: false,
             launch_at_startup: false,
@@ -189,6 +189,24 @@ impl Default for Config {
             pomo_total_rounds: 4,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WifiNetwork {
+    pub ssid: String,
+    pub signal: u32,
+    pub security: String,
+    pub connected: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BluetoothDevice {
+    pub name: String,
+    pub address: String,
+    pub connected: bool,
+    pub paired: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

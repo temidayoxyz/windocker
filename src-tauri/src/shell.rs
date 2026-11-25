@@ -30,11 +30,12 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowExW, FindWindowW, GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW,
-    GetWindowRect, SendMessageTimeoutW, SetWindowPos, ShowWindow, SystemParametersInfoW,
-    GWL_STYLE, HWND_BROADCAST, HWND_TOPMOST, MB_OK, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN,
-    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
-    SPI_GETSCREENSAVEACTIVE, SPI_SETDESKWALLPAPER, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE,
-    SW_SHOW, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WM_SETTINGCHANGE, WS_CAPTION,
+    GetWindowRect, IsWindowVisible, SendMessageTimeoutW, SetWindowPos, ShowWindow,
+    SystemParametersInfoW, GWL_STYLE, HWND_BROADCAST, HWND_TOPMOST, MB_OK, SMTO_ABORTIFHUNG,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPIF_SENDCHANGE,
+    SPIF_UPDATEINIFILE, SPI_GETSCREENSAVEACTIVE, SPI_SETDESKWALLPAPER, SWP_NOACTIVATE,
+    SWP_SHOWWINDOW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    WM_SETTINGCHANGE, WS_CAPTION,
 };
 
 const ABM_SETSTATE: u32 = 0x0000000A;
@@ -159,6 +160,18 @@ pub fn restore_taskbar() {
     apply_taskbar(TaskbarMode::Untouched);
 }
 
+pub fn ensure_taskbar_hidden() {
+    let trays = tray_windows();
+    unsafe {
+        for hwnd in trays {
+            if IsWindowVisible(hwnd).as_bool() {
+                set_appbar_state(hwnd, ABS_AUTOHIDE);
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+    }
+}
+
 pub fn set_acrylic(hwnd: HWND, enabled: bool, dark: bool) {
     unsafe {
         let Ok(module) =
@@ -231,7 +244,6 @@ pub fn set_round_regions(hwnd: HWND, rects: &[(i32, i32, i32, i32, i32)]) {
     }
 }
 
-#[allow(dead_code)]
 pub fn place_window(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) {
     unsafe {
         let _ = SetWindowPos(

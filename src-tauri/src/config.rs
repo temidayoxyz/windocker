@@ -13,7 +13,7 @@ impl Store {
     pub fn open(dir: PathBuf) -> Self {
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("config.json");
-        let config = fs::read_to_string(&path)
+        let mut config = fs::read_to_string(&path)
             .ok()
             .and_then(|text| serde_json::from_str::<Config>(&text).ok())
             .unwrap_or_else(|| {
@@ -22,10 +22,34 @@ impl Store {
                 }
                 Config::default()
             });
-        Self {
+        let mut migrated = false;
+        if config.version < 3 {
+            if config.taskbar_mode == "autohide" {
+                config.taskbar_mode = "hidden".into();
+            }
+            if config.edge_distance == 10 {
+                config.edge_distance = 4;
+            }
+            config.version = 3;
+            migrated = true;
+        }
+        // Deduplicate pins if both "explorer" and a Start Menu File Explorer shortcut were pinned
+        let has_explorer = config.pins.iter().any(|p| matches!(p, crate::model::Pin::App { id } if id == "explorer"));
+        if has_explorer {
+            let before = config.pins.len();
+            config.pins.retain(|p| !matches!(p, crate::model::Pin::App { id } if id != "explorer" && id.ends_with("file explorer.lnk")));
+            if config.pins.len() != before {
+                migrated = true;
+            }
+        }
+        let store = Self {
             path,
             config: Mutex::new(config),
+        };
+        if migrated {
+            store.save();
         }
+        store
     }
 
     pub fn save(&self) {

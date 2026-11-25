@@ -260,8 +260,12 @@ fn place(core: &Core, window: &WebviewWindow) {
             my + mh - 4
         };
     }
-    let _ = window.set_size(tauri::PhysicalSize::new(width as u32, height as u32));
-    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    if let Some(hwnd) = hwnd_of(window) {
+        shell::place_window(hwnd, x, y, width, height);
+    } else {
+        let _ = window.set_size(tauri::PhysicalSize::new(width as u32, height as u32));
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    }
 }
 
 pub fn run() {
@@ -366,6 +370,12 @@ pub fn run() {
                         let _ = app.emit("open-settings", ());
                     }
                     "quit" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                        if let Some(state) = app.try_state::<Arc<Core>>() {
+                            state.running.store(false, Ordering::SeqCst);
+                        }
                         shell::restore_taskbar();
                         app.exit(0);
                     }
@@ -399,6 +409,18 @@ pub fn run() {
             app.manage(core);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+                let app = window.app_handle();
+                if let Some(state) = app.try_state::<Arc<Core>>() {
+                    state.running.store(false, Ordering::SeqCst);
+                }
+                shell::restore_taskbar();
+                app.exit(0);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             patch_config,
@@ -425,6 +447,10 @@ pub fn run() {
             media,
             set_brightness,
             toggle_radio,
+            list_wifi_networks,
+            connect_wifi,
+            list_bluetooth_devices,
+            open_quick_settings,
             toggle_theme,
             toggle_toasts,
             empty_recycle,
@@ -548,7 +574,10 @@ fn poll(app: AppHandle, core: Arc<Core>) {
                 check_meeting_auto_pause(&core, &cfg);
             }
         }
-        if tick % 5 == 0 && !fullscreen {
+        if tick % 8 == 0 && cfg.taskbar_mode == "hidden" {
+            shell::ensure_taskbar_hidden();
+        }
+        if tick % 5 == 0 && !fullscreen && core.running.load(Ordering::Relaxed) {
             if let Some(window) = &window {
                 if audio.is_none() {
                     audio = shell::Audio::open().ok();
@@ -1273,9 +1302,38 @@ fn chime() {
 }
 
 #[tauri::command]
-fn quit(app: AppHandle) {
+fn quit(app: AppHandle, core: State<Arc<Core>>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    core.running.store(false, Ordering::SeqCst);
     shell::restore_taskbar();
     app.exit(0);
+}
+
+#[tauri::command]
+fn list_wifi_networks() -> Vec<model::WifiNetwork> {
+    system::list_wifi_networks()
+}
+
+#[tauri::command]
+fn connect_wifi(ssid: String) -> Result<(), String> {
+    system::connect_wifi(&ssid)
+}
+
+#[tauri::command]
+fn list_bluetooth_devices() -> Vec<model::BluetoothDevice> {
+    system::list_bluetooth_devices()
+}
+
+#[tauri::command]
+fn open_quick_settings(kind: String) {
+    let uri = if kind == "bluetooth" {
+        "ms-settings:bluetooth"
+    } else {
+        "ms-availablenetworks:"
+    };
+    shell::open_path(uri);
 }
 
 #[tauri::command]

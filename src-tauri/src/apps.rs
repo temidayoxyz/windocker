@@ -227,7 +227,6 @@ pub fn cached_exe_icon(path: &str) -> Option<String> {
 
 pub fn suggest_pins(apps: &[AppEntry]) -> Vec<String> {
     let wanted = [
-        "file explorer",
         "windows terminal",
         "visual studio code",
         "google chrome",
@@ -236,9 +235,11 @@ pub fn suggest_pins(apps: &[AppEntry]) -> Vec<String> {
         "settings",
     ];
     let mut pins = vec!["explorer".to_string()];
+    let mut seen_exes = std::collections::HashSet::from(["explorer.exe".to_string()]);
     for name in wanted {
         if let Some(app) = apps.iter().find(|a| a.name.eq_ignore_ascii_case(name)) {
-            if !pins.iter().any(|id| id == &app.id) {
+            let exe = exe_key(&app.exe);
+            if !pins.iter().any(|id| id == &app.id) && (exe.is_empty() || seen_exes.insert(exe)) {
                 pins.push(app.id.clone());
             }
         }

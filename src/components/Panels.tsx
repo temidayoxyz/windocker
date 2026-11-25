@@ -8,10 +8,12 @@ import {
   ICON_PACKS,
   STYLE_OPTIONS,
   type AppEntry,
+  type BluetoothDevice,
   type Config,
   type Snapshot,
   type WallpaperItem,
   type Widget,
+  type WifiNetwork,
 } from "../types";
 import { AppIcon, bytes, fmt, mins, sky, winsFor } from "./Widgets";
 
@@ -320,6 +322,14 @@ export function WidgetCard(props: {
 }) {
   const { id, config, snap, apps, onPatch, onCall, onClose } = props;
 
+  if (id === "wifi") {
+    return <WifiPanel snap={snap} onCall={onCall} onClose={onClose} />;
+  }
+
+  if (id === "bluetooth") {
+    return <BluetoothPanel snap={snap} onCall={onCall} onClose={onClose} />;
+  }
+
   if (id.startsWith("icon:")) {
     const appId = id.slice(5);
     const app = apps.get(appId);
@@ -410,6 +420,149 @@ export function WidgetCard(props: {
         <button className="x" onClick={onClose}>×</button>
       </div>
       <CardBody widget={widget} config={config} snap={snap} apps={apps} onPatch={onPatch} onCall={onCall} onClose={onClose} />
+    </section>
+  );
+}
+
+function WifiPanel({ snap, onCall, onClose }: { snap: Snapshot; onCall: (cmd: string, args?: Record<string, unknown>) => void; onClose: () => void }) {
+  const [nets, setNets] = useState<WifiNetwork[]>([]);
+  const [loading, setLoading] = useState(true);
+  const refresh = () => {
+    setLoading(true);
+    invoke<WifiNetwork[]>("list_wifi_networks")
+      .then(setNets)
+      .catch(() => setNets([]))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    refresh();
+  }, [snap.wifiOn]);
+
+  return (
+    <section className="card mac-sheet">
+      <div className="panel-head">
+        <div className="row">
+          <SfSymbol name="wifi" size={16} />
+          <h2>Wi-Fi</h2>
+        </div>
+        <div className="row-tight">
+          <button
+            className={`mac-switch ${snap.wifiOn ? "on" : ""}`}
+            onClick={() => onCall("toggle_radio", { kind: "wifi" })}
+            title={snap.wifiOn ? "Turn Wi-Fi Off" : "Turn Wi-Fi On"}
+          >
+            <span />
+          </button>
+          <button className="x" onClick={onClose}>×</button>
+        </div>
+      </div>
+      {snap.wifiOn === false ? (
+        <p className="tiny muted">Wi-Fi is turned off.</p>
+      ) : loading ? (
+        <p className="tiny muted">Scanning networks…</p>
+      ) : nets.length === 0 ? (
+        <p className="tiny muted">No Wi-Fi networks found.</p>
+      ) : (
+        <div className="list">
+          {nets.map((net) => (
+            <button
+              key={net.ssid}
+              onClick={() => {
+                if (!net.connected) {
+                  onCall("connect_wifi", { ssid: net.ssid });
+                }
+              }}
+            >
+              <span className="row truncate">
+                <SfSymbol name="wifi" size={13} />
+                <span className="truncate">{net.ssid}</span>
+              </span>
+              <span className="row-tight">
+                {net.connected ? (
+                  <span className="tiny" style={{ color: "var(--up)", fontWeight: 600 }}>Connected</span>
+                ) : (
+                  <span className="tiny muted">{net.signal}%</span>
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+        <button className="pill-btn" onClick={refresh}>Refresh</button>
+        <button className="pill-btn" onClick={() => { onCall("open_quick_settings", { kind: "wifi" }); onClose(); }}>
+          Windows Wi-Fi Settings…
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function BluetoothPanel({ snap, onCall, onClose }: { snap: Snapshot; onCall: (cmd: string, args?: Record<string, unknown>) => void; onClose: () => void }) {
+  const [devices, setDevices] = useState<BluetoothDevice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const refresh = () => {
+    setLoading(true);
+    invoke<BluetoothDevice[]>("list_bluetooth_devices")
+      .then(setDevices)
+      .catch(() => setDevices([]))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    refresh();
+  }, [snap.bluetoothOn]);
+
+  return (
+    <section className="card mac-sheet">
+      <div className="panel-head">
+        <div className="row">
+          <SfSymbol name="bluetooth" size={16} />
+          <h2>Bluetooth</h2>
+        </div>
+        <div className="row-tight">
+          <button
+            className={`mac-switch ${snap.bluetoothOn ? "on" : ""}`}
+            onClick={() => onCall("toggle_radio", { kind: "bluetooth" })}
+            title={snap.bluetoothOn ? "Turn Bluetooth Off" : "Turn Bluetooth On"}
+          >
+            <span />
+          </button>
+          <button className="x" onClick={onClose}>×</button>
+        </div>
+      </div>
+      {snap.bluetoothOn === false ? (
+        <p className="tiny muted">Bluetooth is turned off.</p>
+      ) : loading ? (
+        <p className="tiny muted">Loading devices…</p>
+      ) : devices.length === 0 ? (
+        <p className="tiny muted">No paired Bluetooth devices found.</p>
+      ) : (
+        <div className="list">
+          {devices.map((dev) => (
+            <button
+              key={dev.address}
+              onClick={() => {
+                onCall("open_quick_settings", { kind: "bluetooth" });
+                onClose();
+              }}
+            >
+              <span className="row truncate">
+                <SfSymbol name="bluetooth" size={13} />
+                <span className="truncate">{dev.name}</span>
+              </span>
+              <span className="tiny" style={dev.connected ? { color: "var(--accent)", fontWeight: 600 } : undefined}>
+                {dev.connected ? "Connected" : dev.paired ? "Paired" : "Nearby"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+        <button className="pill-btn" onClick={refresh}>Refresh</button>
+        <button className="pill-btn" onClick={() => { onCall("open_quick_settings", { kind: "bluetooth" }); onClose(); }}>
+          Bluetooth Settings…
+        </button>
+      </div>
     </section>
   );
 }

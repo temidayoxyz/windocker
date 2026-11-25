@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1
+
+Quality-of-life, multi-monitor, icon accuracy, and stability hotfix for 1.1.0:
+
+- **Taskbar Hidden by Default**: Sets `taskbarMode` to `"hidden"` (with automatic migration from 1.1.0) and polls to re-hide `Shell_TrayWnd` and `Shell_SecondaryTrayWnd` so Windows 11 Extend-mode taskbars stay hidden.
+- **Hover Tooltips & Bottom Spacing**: Expanded transparent stage headroom so magnified hover app labels are never clipped, and reduced bottom edge padding so the dock sits closer to the screen edge.
+- **Icon Deduplication & Accuracy**: Fixed duplicate File Explorer pins, stopped `opencode.exe` from matching VS Code, added a dedicated **Telegram** squircle icon, and updated the Launchpad icon to a macOS-squircle Windows 11 emblem.
+- **Wi-Fi & Bluetooth Device Pickers**: Split Control Center Wi-Fi and Bluetooth pills so clicking the chevron opens a device/network list with radio toggle, Wi-Fi network connect, Bluetooth paired/connected status, and Windows Settings shortcut.
+- **Smooth Launchpad & Clean Quit**: Fixed Launchpad search height to prevent flicker, replaced separate size/position calls with atomic Win32 `SetWindowPos` (eliminating mid-screen jumps on launch), and hid the window + stopped background polling on exit to prevent "Not Responding" white frames.
+
 ## 1.1.0
 
 Major macOS-style dock, icon pack, and LumaBar-inspired bento widget upgrade for Windows 10 and Windows 11.

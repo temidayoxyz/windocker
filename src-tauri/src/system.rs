@@ -338,3 +338,168 @@ pub fn set_brightness(percent: u32) -> Result<(), String> {
         result
     }
 }
+
+pub fn list_wifi_networks() -> Vec<crate::model::WifiNetwork> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let connected_ssid = std::process::Command::new("netsh")
+        .args(["wlan", "show", "interfaces"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|text| {
+            text.lines().find_map(|line| {
+                let t = line.trim();
+                if t.starts_with("SSID") && !t.starts_with("SSIDs") {
+                    t.split_once(':').map(|(_, v)| v.trim().to_string())
+                } else {
+                    None
+                }
+            })
+        })
+        .unwrap_or_default();
+
+    let output = std::process::Command::new("netsh")
+        .args(["wlan", "show", "networks", "mode=bssid"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    let Ok(out) = output else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut nets: Vec<crate::model::WifiNetwork> = Vec::new();
+    let mut current_ssid = String::new();
+    let mut current_sec = String::new();
+    let mut current_sig = 0u32;
+
+    let push_cur = |nets: &mut Vec<crate::model::WifiNetwork>,
+                    ssid: &str,
+                    sig: u32,
+                    sec: &str| {
+        if ssid.is_empty() {
+            return;
+        }
+        if let Some(existing) = nets.iter_mut().find(|n| n.ssid == ssid) {
+            if sig > existing.signal {
+                existing.signal = sig;
+            }
+            return;
+        }
+        nets.push(crate::model::WifiNetwork {
+            ssid: ssid.to_string(),
+            signal: sig,
+            security: sec.to_string(),
+            connected: !connected_ssid.is_empty() && ssid == connected_ssid,
+        });
+    };
+
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("SSID ") {
+            push_cur(&mut nets, &current_ssid, current_sig, &current_sec);
+            current_ssid = t
+                .split_once(':')
+                .map(|(_, v)| v.trim().to_string())
+                .unwrap_or_default();
+            current_sec.clear();
+            current_sig = 0;
+        } else if t.starts_with("Authentication") {
+            current_sec = t
+                .split_once(':')
+                .map(|(_, v)| v.trim().to_string())
+                .unwrap_or_default();
+        } else if t.starts_with("Signal") {
+            if let Some((_, v)) = t.split_once(':') {
+                let num = v.trim().trim_end_matches('%').parse::<u32>().unwrap_or(0);
+                if num > current_sig {
+                    current_sig = num;
+                }
+            }
+        }
+    }
+    push_cur(&mut nets, &current_ssid, current_sig, &current_sec);
+    nets.sort_by(|a, b| b.connected.cmp(&a.connected).then(b.signal.cmp(&a.signal)));
+    nets.truncate(14);
+    nets
+}
+
+pub fn connect_wifi(ssid: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let out = std::process::Command::new("netsh")
+        .args(["wlan", "connect", &format!("name={ssid}")])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let msg = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if msg.is_empty() {
+            Err("Could not connect. Open Windows Wi-Fi settings for password entry.".into())
+        } else {
+            Err(msg)
+        }
+    }
+}
+
+pub fn list_bluetooth_devices() -> Vec<crate::model::BluetoothDevice> {
+    use windows::Win32::Devices::Bluetooth::{
+        BluetoothFindDeviceClose, BluetoothFindFirstDevice, BluetoothFindNextDevice,
+        BLUETOOTH_DEVICE_INFO, BLUETOOTH_DEVICE_SEARCH_PARAMS,
+    };
+    let mut devices = Vec::new();
+    unsafe {
+        let params = BLUETOOTH_DEVICE_SEARCH_PARAMS {
+            dwSize: std::mem::size_of::<BLUETOOTH_DEVICE_SEARCH_PARAMS>() as u32,
+            fReturnAuthenticated: true.into(),
+            fReturnRemembered: true.into(),
+            fReturnUnknown: false.into(),
+            fReturnConnected: true.into(),
+            fIssueInquiry: false.into(),
+            cTimeoutMultiplier: 1,
+            hRadio: windows::Win32::Foundation::HANDLE::default(),
+        };
+        let mut info = BLUETOOTH_DEVICE_INFO {
+            dwSize: std::mem::size_of::<BLUETOOTH_DEVICE_INFO>() as u32,
+            ..Default::default()
+        };
+        let Ok(handle) = BluetoothFindFirstDevice(&params, &mut info) else {
+            return devices;
+        };
+        loop {
+            let end = info
+                .szName
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(info.szName.len());
+            let name = String::from_utf16_lossy(&info.szName[..end]);
+            let addr = info.Address.Anonymous.ullLong;
+            let address = format!(
+                "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                (addr >> 40) & 0xff,
+                (addr >> 32) & 0xff,
+                (addr >> 24) & 0xff,
+                (addr >> 16) & 0xff,
+                (addr >> 8) & 0xff,
+                addr & 0xff
+            );
+            if !name.is_empty() {
+                devices.push(crate::model::BluetoothDevice {
+                    name,
+                    address,
+                    connected: info.fConnected.as_bool(),
+                    paired: info.fAuthenticated.as_bool() || info.fRemembered.as_bool(),
+                });
+            }
+            if BluetoothFindNextDevice(handle, &mut info).is_err() {
+                break;
+            }
+        }
+        let _ = BluetoothFindDeviceClose(handle);
+    }
+    devices.sort_by(|a, b| b.connected.cmp(&a.connected).then(a.name.cmp(&b.name)));
+    devices
+}

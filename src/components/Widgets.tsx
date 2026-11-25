@@ -216,7 +216,20 @@ export function Tile(props: {
       }
     }
 
-    const totalItems = 1 + config.pins.length + extraRunning.length;
+    const seenPinIds = new Set<string>();
+    const seenPinExes = new Set<string>();
+    const uniquePins = config.pins.filter((p) => {
+      if (seenPinIds.has(p.id)) return false;
+      seenPinIds.add(p.id);
+      if (p.type === "app") {
+        const exe = fileOf(apps.get(p.id)?.exe || "");
+        if (exe && seenPinExes.has(exe)) return false;
+        if (exe) seenPinExes.add(exe);
+      }
+      return true;
+    });
+
+    const totalItems = 1 + uniquePins.length + extraRunning.length;
     const magFor = (idx: number): React.CSSProperties => {
       if (!config.magnification || hoverIdx == null) return {};
       const d = Math.abs(idx - hoverIdx);
@@ -252,7 +265,7 @@ export function Tile(props: {
           </span>
         </button>
 
-        {config.pins.map((pin, index) => {
+        {uniquePins.map((pin, index) => {
           const itemIdx = index + 1;
           return (
             <PinButton
@@ -266,7 +279,7 @@ export function Tile(props: {
               onDragPin={(id) => { props.dragPin.current = id; }}
               onDropPin={(id) => { if (props.dragPin.current) props.movePin(props.dragPin.current, id); }}
               onPinMenu={props.openMenu}
-              nextAppId={config.pins.slice(index + 1).find((item) => item.type === "app")?.id}
+              nextAppId={uniquePins.slice(index + 1).find((item) => item.type === "app")?.id}
               magStyle={magFor(itemIdx)}
               bouncing={bouncing === pin.id}
               onHover={() => setHoverIdx(itemIdx)}
@@ -279,7 +292,7 @@ export function Tile(props: {
           <>
             {config.dockDivider && <span className="apps-sep" aria-hidden />}
             {extraRunning.map((win, rIdx) => {
-              const itemIdx = 1 + config.pins.length + rIdx;
+              const itemIdx = 1 + uniquePins.length + rIdx;
               const matches = snap.running.filter((r) => fileOf(r.exe) === fileOf(win.exe));
               const catalogMatch = [...apps.values()].find((a) => fileOf(a.exe) === fileOf(win.exe));
               return (
@@ -327,24 +340,40 @@ export function Tile(props: {
   if (widget.kind === "quick") {
     return (
       <div className="tile quick-bar" onContextMenu={onMenu}>
-        <button
-          className={`ctrl-pill ${snap.wifiOn ? "on" : ""}`}
-          title="Wi-Fi"
-          onClick={() => onCall("toggle_radio", { kind: "wifi" })}
-        >
-          <SfSymbol name="wifi" size={14} />
+        <div className={`ctrl-pill ctrl-split ${snap.wifiOn ? "on" : ""}`}>
+          <button
+            className="ctrl-main"
+            title={snap.wifiOn ? "Turn Wi-Fi Off" : "Turn Wi-Fi On"}
+            onClick={() => onCall("toggle_radio", { kind: "wifi" })}
+          >
+            <SfSymbol name="wifi" size={14} />
+          </button>
           <span className="ctrl-sep" />
-          <SfSymbol name="chevron" size={11} className="muted" />
-        </button>
-        <button
-          className={`ctrl-pill ${snap.bluetoothOn ? "on" : ""}`}
-          title="Bluetooth"
-          onClick={() => onCall("toggle_radio", { kind: "bluetooth" })}
-        >
-          <SfSymbol name="bluetooth" size={14} />
+          <button
+            className="ctrl-sub"
+            title="Select Wi-Fi Network"
+            onClick={() => setPanel("wifi")}
+          >
+            <SfSymbol name="chevron" size={11} className="muted" />
+          </button>
+        </div>
+        <div className={`ctrl-pill ctrl-split ${snap.bluetoothOn ? "on" : ""}`}>
+          <button
+            className="ctrl-main"
+            title={snap.bluetoothOn ? "Turn Bluetooth Off" : "Turn Bluetooth On"}
+            onClick={() => onCall("toggle_radio", { kind: "bluetooth" })}
+          >
+            <SfSymbol name="bluetooth" size={14} />
+          </button>
           <span className="ctrl-sep" />
-          <SfSymbol name="chevron" size={11} className="muted" />
-        </button>
+          <button
+            className="ctrl-sub"
+            title="Bluetooth Devices"
+            onClick={() => setPanel("bluetooth")}
+          >
+            <SfSymbol name="chevron" size={11} className="muted" />
+          </button>
+        </div>
         <button
           className={`ctrl-round ${!snap.lightTheme ? "on-subtle" : ""}`}
           title={snap.lightTheme ? "Switch to Dark Mode" : "Switch to Light Mode"}
