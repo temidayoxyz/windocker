@@ -92,12 +92,8 @@ input, textarea { user-select: text; }
   gap: 5px;
   background: transparent;
   border: 0;
-  max-width: calc(var(--screen, 1280px) - 300px);
-  overflow-x: auto;
-  overflow-y: visible;
-  scrollbar-width: none;
+  overflow: visible;
 }
-.tile.apps::-webkit-scrollbar { display: none; }
 .tile.apps:hover { background: transparent; }
 
 .dock-divider, .apps-sep {

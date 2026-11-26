@@ -429,10 +429,11 @@ pub fn run() {
                 }
             }
             let screen = ScreenDay::load(&dir);
+            let cached_apps = apps::load_cached_catalog(&dir);
             log_line(&dir, "Windocker started");
             let core = Arc::new(Core {
                 store,
-                catalog: Mutex::new(Vec::new()),
+                catalog: Mutex::new(cached_apps),
                 preview: Mutex::new(None),
                 screen: Mutex::new(screen),
                 remote: Mutex::new(Remote {
@@ -520,8 +521,10 @@ pub fn run() {
             }
             let scan_handle = app.handle().clone();
             let scan_core = core.clone();
+            let scan_dir = dir.clone();
             std::thread::spawn(move || {
                 let apps = apps::scan_apps();
+                apps::save_cached_catalog(&scan_dir, &apps);
                 let empty = scan_core.store.snapshot_config().pins.is_empty();
                 if empty {
                     let pins = apps::suggest_pins(&apps);
@@ -678,16 +681,20 @@ fn poll(app: AppHandle, core: Arc<Core>) {
             placement.fullscreen = win_fs;
             if cfg.auto_hide && !win_fs {
                 let (cx, cy) = shell::cursor_pos();
-                let near_edge = if cfg.edge == "top" {
-                    cy <= rect.bottom + 8
-                } else {
-                    cy >= rect.top - 8
-                };
-                let over = cx >= rect.left - 8
-                    && cx <= rect.right + 8
-                    && cy >= rect.top - 12
-                    && cy <= rect.bottom + 12;
-                placement.collapsed = !(near_edge || over);
+                if let Some((mx, my, mw, mh, _, _, _)) = monitor_box(win, &cfg.display_mode) {
+                    let in_x = cx >= mx && cx < mx + mw;
+                    let near_edge = in_x
+                        && if cfg.edge == "top" {
+                            cy >= my && cy <= my + 18
+                        } else {
+                            cy >= my + mh - 18 && cy <= my + mh
+                        };
+                    let over = cx >= rect.left - 8
+                        && cx <= rect.right + 8
+                        && cy >= rect.top - 12
+                        && cy <= rect.bottom + 12;
+                    placement.collapsed = !(near_edge || over);
+                }
             } else if !cfg.auto_hide {
                 placement.collapsed = false;
             }

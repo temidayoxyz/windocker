@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+Hotfix for v1.3.0 multi-monitor, icon catalog, Launchpad search, and hover clipping:
+
+- **Instant App Catalog & Icons (`catalog.json` cache)**: Cached scanned Start Menu apps locally and skipped slow/unreachable UNC network shortcuts so Launchpad search and pinned app icons load immediately with zero `?` placeholders.
+- **Hover Magnification & Tooltip Clipping Fix**: Removed `overflow-x: auto` from `.tile.apps` (which forced `overflow-y` clipping in CSS), restoring full unclipped magnification and hover labels.
+- **Per-Monitor Auto-Hide Bounds**: Fixed `autoHide` edge detection in Extend mode to check cursor bounds per-monitor rather than globally.
+
 ## 1.3.0
 
 Multi-monitor rendering fix, native-first icon philosophy, and refined dock UI:

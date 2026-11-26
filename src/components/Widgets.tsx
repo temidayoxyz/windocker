@@ -1110,10 +1110,11 @@ function PinButton(props: {
   }
   const app = apps.get(pin.id);
   const windows = app ? winsFor(app, snap.running) : [];
+  const fallbackLabel = pin.id.split(/[/\\]/).pop()?.replace(/\.lnk$/i, "") || pin.id;
   return (
     <button
       className={`app-hit ${props.bouncing ? "bounce" : ""}`}
-      data-label={config.showLabels ? app?.name || pin.id : undefined}
+      data-label={config.showLabels ? app?.name || fallbackLabel : undefined}
       style={props.magStyle}
       onMouseEnter={() => {
         props.onHover();
@@ -1162,6 +1163,7 @@ function PinButton(props: {
         pack={config.iconPack}
         squircleWrap={config.squircleWrap}
         customIcons={config.customIcons}
+        fallbackName={fallbackLabel}
       />
     </button>
   );

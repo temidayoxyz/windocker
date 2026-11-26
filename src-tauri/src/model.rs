@@ -209,7 +209,7 @@ pub struct BluetoothDevice {
     pub paired: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppEntry {
     pub id: String,

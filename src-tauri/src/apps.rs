@@ -29,6 +29,21 @@ use crate::shell::{self, open_path};
 
 static EXE_ICON_CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
 
+pub fn load_cached_catalog(dir: &Path) -> Vec<AppEntry> {
+    let path = dir.join("catalog.json");
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<AppEntry>>(&t).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_cached_catalog(dir: &Path, apps: &[AppEntry]) {
+    let path = dir.join("catalog.json");
+    if let Ok(json) = serde_json::to_string(apps) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 pub fn scan_apps() -> Vec<AppEntry> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -91,11 +106,27 @@ fn lnk_app(path: &Path, name: &str) -> Option<AppEntry> {
     let launch = path.to_string_lossy().to_string();
     let (exe_opt, icon_loc) = resolve_lnk_details(path);
     let exe = exe_opt.unwrap_or_default();
+    if exe.starts_with(r"\\") {
+        return None;
+    }
     let icon = icon_loc
+        .filter(|(p, _)| !p.starts_with(r"\\") && Path::new(p).exists())
         .and_then(|(p, idx)| highres_icon_index(&p, idx))
-        .or_else(|| highres_exe_icon(&exe))
+        .or_else(|| {
+            if !exe.is_empty() && Path::new(&exe).exists() {
+                highres_exe_icon(&exe)
+            } else {
+                None
+            }
+        })
         .or_else(|| file_icon(&launch))
-        .or_else(|| file_icon(&exe));
+        .or_else(|| {
+            if !exe.is_empty() && Path::new(&exe).exists() {
+                file_icon(&exe)
+            } else {
+                None
+            }
+        });
     Some(AppEntry {
         id: launch.to_lowercase(),
         name: name.to_string(),
