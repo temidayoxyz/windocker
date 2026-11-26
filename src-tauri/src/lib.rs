@@ -81,6 +81,7 @@ struct Core {
     screen: Mutex<ScreenDay>,
     remote: Mutex<Remote>,
     placements: Mutex<HashMap<String, Placement>>,
+    monitor_sig: Mutex<String>,
     running: AtomicBool,
 }
 
@@ -256,11 +257,41 @@ fn dock_windows(app: &AppHandle) -> Vec<WebviewWindow> {
         .collect()
 }
 
+fn compute_monitor_sig(window: &WebviewWindow) -> String {
+    let Ok(monitors) = window.available_monitors() else {
+        return String::new();
+    };
+    let primary = window.primary_monitor().ok().flatten();
+    monitors
+        .iter()
+        .map(|m| {
+            let p = m.position();
+            let s = m.size();
+            let is_p = primary
+                .as_ref()
+                .map(|pm| pm.position().x == p.x && pm.position().y == p.y)
+                .unwrap_or(false);
+            format!(
+                "{},{}:{}x{}@{}:{}",
+                p.x,
+                p.y,
+                s.width,
+                s.height,
+                (m.scale_factor() * 100.0).round() as i32,
+                if is_p { 1 } else { 0 }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn sync_monitors(app: &AppHandle, core: &Arc<Core>) {
     let cfg = core.store.snapshot_config();
     let Some(main_win) = app.get_webview_window("main") else {
         return;
     };
+    let sig = compute_monitor_sig(&main_win);
+    *core.monitor_sig.lock().unwrap_or_else(|e| e.into_inner()) = sig;
     let monitors = main_win.available_monitors().unwrap_or_default();
     let want_all = cfg.display_mode == "all" && monitors.len() > 1;
 
@@ -269,14 +300,17 @@ fn sync_monitors(app: &AppHandle, core: &Arc<Core>) {
             if !want_all || idx >= monitors.len() {
                 let _ = win.hide();
                 let _ = win.close();
+                core.placements
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&label);
             }
         }
     }
 
     if want_all {
         let primary = main_win.primary_monitor().ok().flatten();
-        let mut extra_idx = 0usize;
-        for m in &monitors {
+        for (mon_idx, m) in monitors.iter().enumerate() {
             let is_primary = primary
                 .as_ref()
                 .map(|p| p.position().x == m.position().x && p.position().y == m.position().y)
@@ -284,11 +318,6 @@ fn sync_monitors(app: &AppHandle, core: &Arc<Core>) {
             if is_primary {
                 continue;
             }
-            extra_idx += 1;
-            let mon_idx = monitors
-                .iter()
-                .position(|x| x.position().x == m.position().x && x.position().y == m.position().y)
-                .unwrap_or(extra_idx);
             let label = format!("dock-{mon_idx}");
             if app.get_webview_window(&label).is_none() {
                 if let Ok(win) = tauri::WebviewWindowBuilder::new(
@@ -322,12 +351,15 @@ fn place(core: &Core, window: &WebviewWindow) {
     let Some((mx, my, mw, mh, _wx, work_h, scale)) = monitor_box(window, &cfg.display_mode) else {
         return;
     };
+    let screen_css_w = mw as f64 / scale;
+    let screen_css_h = mh as f64 / scale;
     let mut placements = core.placements.lock().unwrap_or_else(|e| e.into_inner());
     let placement = placements.entry(window.label().to_string()).or_default();
     placement.scale = scale;
-    placement.screen_w = mw as f64 / scale;
-    placement.screen_h = mh as f64 / scale;
+    placement.screen_w = screen_css_w;
+    placement.screen_h = screen_css_h;
     if placement.fullscreen {
+        drop(placements);
         let _ = window.hide();
         return;
     }
@@ -351,13 +383,25 @@ fn place(core: &Core, window: &WebviewWindow) {
         };
     }
     drop(placements);
+    // Ensure WebView2 controller is marked visible (ICoreWebView2Controller::put_IsVisible)
+    // before positioning via Win32 SetWindowPos so secondary monitors never render blank.
+    if !window.is_visible().unwrap_or(false) {
+        let _ = window.show();
+    }
     if let Some(hwnd) = hwnd_of(window) {
         shell::place_window(hwnd, x, y, width, height);
     } else {
-        let _ = window.show();
         let _ = window.set_size(tauri::PhysicalSize::new(width as u32, height as u32));
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
+    let _ = window.emit(
+        "monitor",
+        serde_json::json!({
+            "screenCssWidth": screen_css_w,
+            "screenCssHeight": screen_css_h,
+            "monitorScale": scale,
+        }),
+    );
 }
 
 pub fn run() {
@@ -414,6 +458,7 @@ pub fn run() {
                     "main".to_string(),
                     Placement::default(),
                 )])),
+                monitor_sig: Mutex::new(String::new()),
                 running: AtomicBool::new(true),
             });
             if let Some(window) = app.get_webview_window("main") {
@@ -531,6 +576,7 @@ pub fn run() {
             rename_group,
             launch_app,
             activate_window,
+            minimize_window,
             close_window,
             end_task,
             set_volume,
@@ -606,40 +652,73 @@ fn poll(app: AppHandle, core: Arc<Core>) {
     while core.running.load(Ordering::Relaxed) {
         tick = tick.wrapping_add(1);
         let cfg = core.store.snapshot_config();
-        let window = app.get_webview_window("main");
-        let our = window.as_ref().and_then(hwnd_of);
-        let fullscreen = our
-            .map(|hwnd| shell::foreground_is_borderless_fullscreen(hwnd))
-            .unwrap_or(false);
+        let fs_mon = shell::foreground_fullscreen_monitor();
+        let wins = dock_windows(&app);
         let mut need_place = false;
-        {
+        let mut any_visible = false;
+        for win in &wins {
+            let Some(hwnd) = hwnd_of(win) else {
+                continue;
+            };
+            let mut rect = windows::Win32::Foundation::RECT::default();
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect);
+            }
+            let win_mon = shell::monitor_handle_at(
+                (rect.left + rect.right) / 2,
+                (rect.top + rect.bottom) / 2,
+            );
+            let win_fs = fs_mon.map(|m| m == win_mon).unwrap_or(false);
+            if !win_fs {
+                any_visible = true;
+            }
             let mut placements = core.placements.lock().unwrap_or_else(|e| e.into_inner());
-            let placement = placements.entry("main".to_string()).or_default();
+            let placement = placements.entry(win.label().to_string()).or_default();
             let was = placement.fullscreen;
-            placement.fullscreen = fullscreen;
-            if cfg.auto_hide && !fullscreen {
-                if let Some(hwnd) = our {
-                    let (cx, cy) = shell::cursor_pos();
-                    unsafe {
-                        let mut rect = windows::Win32::Foundation::RECT::default();
-                        let _ =
-                            windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect);
-                        let near_edge = if cfg.edge == "top" {
-                            cy <= rect.bottom + 8
-                        } else {
-                            cy >= rect.top - 8
-                        };
-                        let over = cx >= rect.left - 8
-                            && cx <= rect.right + 8
-                            && cy >= rect.top - 12
-                            && cy <= rect.bottom + 12;
-                        placement.collapsed = !(near_edge || over);
-                    }
-                }
+            placement.fullscreen = win_fs;
+            if cfg.auto_hide && !win_fs {
+                let (cx, cy) = shell::cursor_pos();
+                let near_edge = if cfg.edge == "top" {
+                    cy <= rect.bottom + 8
+                } else {
+                    cy >= rect.top - 8
+                };
+                let over = cx >= rect.left - 8
+                    && cx <= rect.right + 8
+                    && cy >= rect.top - 12
+                    && cy <= rect.bottom + 12;
+                placement.collapsed = !(near_edge || over);
             } else if !cfg.auto_hide {
                 placement.collapsed = false;
             }
-            need_place = was != placement.fullscreen || cfg.auto_hide || cfg.display_mode == "follow";
+            if was != placement.fullscreen || cfg.auto_hide || cfg.display_mode == "follow" {
+                need_place = true;
+            }
+        }
+        let fullscreen = !any_visible;
+        if tick % 6 == 0 && core.running.load(Ordering::Relaxed) {
+            if let Some(main_win) = app.get_webview_window("main") {
+                let sig = compute_monitor_sig(&main_win);
+                let prev_sig = core
+                    .monitor_sig
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                if !sig.is_empty() && sig != prev_sig {
+                    let app_sync = app.clone();
+                    let core_sync = core.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if !core_sync.running.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        sync_monitors(&app_sync, &core_sync);
+                        for win in dock_windows(&app_sync) {
+                            apply_visuals(&core_sync, &win);
+                            place(&core_sync, &win);
+                        }
+                    });
+                }
+            }
         }
         if need_place && core.running.load(Ordering::Relaxed) {
             let app_place = app.clone();
@@ -871,6 +950,7 @@ fn build_snapshot(
         remote_events: remote.events.clone(),
         self_cpu,
         self_mem,
+        foreground_hwnd: shell::foreground_hwnd(),
         fullscreen: placement.fullscreen,
         screen_css_width: placement.screen_w,
         screen_css_height: placement.screen_h,
@@ -1168,6 +1248,13 @@ async fn launch_app(core: State<'_, Arc<Core>>, id: String) -> Result<(), String
 #[tauri::command]
 async fn activate_window(hwnd: i64) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || apps::activate(hwnd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn minimize_window(hwnd: i64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || apps::minimize_window(hwnd))
         .await
         .map_err(|e| e.to_string())?
 }

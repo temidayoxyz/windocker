@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0
+
+Multi-monitor rendering fix, native-first icon philosophy, and refined dock UI:
+
+- **Multi-Monitor Rendering & Hotplug Fix**:
+  - Defaulted `displayMode` to `"all"` (with automatic v3→v4 migration when hiding the Windows taskbar) so extended monitors never show a blank taskbar space.
+  - Fixed secondary monitor WebView2 rendering by calling `window.show()` (`ICoreWebView2Controller::put_IsVisible(TRUE)`) before atomic Win32 `SetWindowPos` placement.
+  - Added per-monitor screen/DPI metric events (`monitor`), per-monitor borderless-fullscreen detection, and automatic monitor hotplug/resolution/arrangement change detection in the background loop.
+  - Guarded Welcome and Settings modals to open only on the primary dock instance.
+- **Native-First Icon System**:
+  - Prioritized authentic extracted Windows application icons (including 96×96 `.lnk` `GetIconLocation` extraction) instead of overwriting recognizable app branding with generic macOS icons.
+  - Replaced legacy macOS icon packs with four cohesive Windocker styles: **Windocker** (default), **Squircle Frame**, **Dark Frame**, and **Original**.
+  - Reserved custom Windocker vector icons for shell utilities lacking native `.exe` icons (Launcher, Trash, Folders, Settings).
+- **Refined Dock UI & Window Controls**:
+  - Added active/focused window indicator (`foregroundHwnd`) with an accent glow pill under the currently active app, distinct from background running dots.
+  - Added purpose-built Minimize and Close icon controls in the live DWM window preview card and multi-window switcher.
+  - Added clean horizontal overflow scrolling in the app dock for large numbers of pinned/running apps.
+
 ## 1.2.0
 
 Multi-Monitor & Window Engine update, plus non-blocking async architecture:

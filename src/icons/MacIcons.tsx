@@ -22,31 +22,20 @@ export const MAC_ICON_KEYS = [
   { key: "github", label: "GitHub" },
 ] as const;
 
-export function resolveMacIconKey(app?: Pick<AppEntry, "id" | "name" | "exe">, customIcons?: Record<string, string>): string | null {
+export function resolveMacIconKey(app?: Pick<AppEntry, "id" | "name" | "exe" | "icon">, customIcons?: Record<string, string>): string | null {
   if (!app) return null;
   const custom = customIcons?.[app.id];
   if (custom && custom !== "auto") return custom;
+  // Native-first: preserve authentic Windows application icons whenever extracted.
+  // Only supply Windocker-designed utility icons for shell URIs or apps lacking an icon.
   const exeFile = (app.exe.split(/[/\\]/).pop() || "").toLowerCase();
   const nameLower = app.name.toLowerCase();
-  const hay = `${app.name} ${app.exe} ${app.id}`.toLowerCase();
-  if (exeFile === "explorer.exe" || nameLower === "file explorer" || app.id === "explorer") return "finder";
-  if (exeFile === "msedge.exe" || hay.includes("microsoft edge") || nameLower === "safari") return "safari";
-  if (hay.includes("chrome")) return "chrome";
-  if (hay.includes("firefox")) return "firefox";
-  if (hay.includes("windows terminal") || exeFile === "wt.exe" || exeFile === "powershell.exe" || exeFile === "pwsh.exe" || exeFile === "cmd.exe" || hay.includes("git bash") || hay.includes("wezterm") || hay.includes("alacritty")) return "terminal";
-  if (hay.includes("notepad") || hay.includes("obsidian") || hay.includes("notion") || hay.includes("onenote")) return "notes";
-  if (exeFile === "systemsettings.exe" || hay.includes("ms-settings") || nameLower === "settings" || hay.includes("control panel")) return "settings";
-  if (exeFile === "taskmgr.exe" || hay.includes("task manager") || hay.includes("activity monitor")) return "activity";
-  if (exeFile === "code.exe" || exeFile === "code - insiders.exe" || nameLower.includes("visual studio code") || exeFile === "cursor.exe" || exeFile === "idea64.exe") return "vscode";
-  if (hay.includes("spotify") || hay.includes("apple music") || hay.includes("vlc") || hay.includes("itunes") || hay.includes("media player")) return "music";
-  if (hay.includes("photos")) return "photos";
-  if (hay.includes("outlook") || hay.includes("thunderbird") || nameLower === "mail") return "mail";
-  if (exeFile === "calc.exe" || exeFile === "calculatorapp.exe" || nameLower === "calculator") return "calculator";
-  if (hay.includes("telegram")) return "telegram";
-  if (hay.includes("whatsapp") || hay.includes("slack") || hay.includes("teams") || nameLower === "messages") return "messages";
-  if (hay.includes("discord")) return "discord";
-  if (hay.includes("docker")) return "docker";
-  if (hay.includes("github")) return "github";
+  if (exeFile === "systemsettings.exe" || app.id === "ms-settings" || (!app.icon && nameLower === "settings")) return "settings";
+  if (app.icon) return null;
+  if (exeFile === "explorer.exe" || app.id === "explorer") return "finder";
+  if (exeFile === "taskmgr.exe" || app.id === "taskmgr") return "activity";
+  if (exeFile === "wt.exe" || exeFile === "cmd.exe" || exeFile === "powershell.exe") return "terminal";
+  if (exeFile === "calc.exe" || exeFile === "calculatorapp.exe") return "calculator";
   return null;
 }
 
@@ -60,7 +49,7 @@ export function MacSquircleShell({
   children: React.ReactNode;
 }) {
   const isDark = pack === "dark";
-  const isGlass = pack === "glass";
+  const isGlass = pack === "glass" || pack === "squircle";
   const shellStyle: React.CSSProperties = isDark
     ? {
         background: "linear-gradient(160deg, #27272c 0%, #151519 100%)",
@@ -454,6 +443,12 @@ export function SfSymbol({ name, size = 15, className = "" }: { name: string; si
       return <svg {...props}><polyline points="7 16 3 12 7 8" /><line x1="21" y1="12" x2="3" y2="12" /><polyline points="17 8 21 12 17 16" /></svg>;
     case "check":
       return <svg {...props}><polyline points="20 6 9 17 4 12" /></svg>;
+    case "minimize":
+      return <svg {...props}><line x1="5" y1="12" x2="19" y2="12" /></svg>;
+    case "close":
+      return <svg {...props}><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>;
+    case "focus":
+      return <svg {...props}><rect x="4" y="4" width="16" height="16" rx="3" /><line x1="4" y1="9" x2="20" y2="9" /></svg>;
     case "sparkles":
       return <svg {...props}><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" /></svg>;
     default:

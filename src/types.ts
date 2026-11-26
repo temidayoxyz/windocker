@@ -39,7 +39,7 @@ export interface CalEvent {
 }
 
 export type DockStyle = "liquid-glass" | "glass" | "ios" | "midnight" | "black" | "white" | "clear";
-export type IconPack = "sequoia" | "dark" | "glass" | "native";
+export type IconPack = "windocker" | "squircle" | "dark" | "original";
 
 export interface Config {
   version: number;
@@ -197,6 +197,7 @@ export interface Snapshot {
   remoteEvents: CalEvent[];
   selfCpu: number;
   selfMem: number;
+  foregroundHwnd: number;
   fullscreen: boolean;
   screenCssWidth: number;
   screenCssHeight: number;
@@ -265,10 +266,10 @@ export const STYLE_OPTIONS: { id: DockStyle; name: string; swatch: string }[] = 
 ];
 
 export const ICON_PACKS: { id: IconPack; name: string; desc: string }[] = [
-  { id: "sequoia", name: "macOS Sequoia", desc: "Vibrant Apple squircle icons" },
-  { id: "dark", name: "macOS Dark", desc: "Obsidian squircles with tinted glyphs" },
-  { id: "glass", name: "Tahoe Glass", desc: "Translucent liquid-glass squircles" },
-  { id: "native", name: "Windows Native", desc: "Original Windows app icons" },
+  { id: "windocker", name: "Windocker", desc: "Authentic app icons with bespoke system controls" },
+  { id: "squircle", name: "Squircle Frame", desc: "Native app icons framed in glass squircles" },
+  { id: "dark", name: "Dark Frame", desc: "Native app icons framed in dark slate squircles" },
+  { id: "original", name: "Original", desc: "Unframed native Windows icons" },
 ];
 
 export const ACCENT_PRESETS = [

@@ -89,8 +89,11 @@ fn walk(dir: &Path, out: &mut Vec<AppEntry>) {
 
 fn lnk_app(path: &Path, name: &str) -> Option<AppEntry> {
     let launch = path.to_string_lossy().to_string();
-    let exe = resolve_lnk(path).unwrap_or_default();
-    let icon = highres_exe_icon(&exe)
+    let (exe_opt, icon_loc) = resolve_lnk_details(path);
+    let exe = exe_opt.unwrap_or_default();
+    let icon = icon_loc
+        .and_then(|(p, idx)| highres_icon_index(&p, idx))
+        .or_else(|| highres_exe_icon(&exe))
         .or_else(|| file_icon(&launch))
         .or_else(|| file_icon(&exe));
     Some(AppEntry {
@@ -134,45 +137,60 @@ fn taskmgr_entry() -> AppEntry {
     }
 }
 
-fn resolve_lnk(path: &Path) -> Option<String> {
+fn resolve_lnk_details(path: &Path) -> (Option<String>, Option<(String, i32)>) {
     unsafe {
-        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
-        let persist: IPersistFile = link.cast().ok()?;
+        let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER)
+        else {
+            return (None, None);
+        };
+        let Ok(persist) = link.cast::<IPersistFile>() else {
+            return (None, None);
+        };
         let wide: Vec<u16> = path
             .to_string_lossy()
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
-        persist.Load(PCWSTR(wide.as_ptr()), STGM_READ).ok()?;
-        let mut buf = [0u16; 520];
-        link.GetPath(&mut buf, std::ptr::null_mut(), 0).ok()?;
-        let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
-        let text = String::from_utf16_lossy(&buf[..end]);
-        if text.is_empty() {
-            None
-        } else {
-            Some(text)
+        if persist.Load(PCWSTR(wide.as_ptr()), STGM_READ).is_err() {
+            return (None, None);
         }
+        let mut buf = [0u16; 520];
+        let exe = if link.GetPath(&mut buf, std::ptr::null_mut(), 0).is_ok() {
+            let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+            let text = String::from_utf16_lossy(&buf[..end]);
+            if text.is_empty() { None } else { Some(text) }
+        } else {
+            None
+        };
+        let mut ibuf = [0u16; 520];
+        let mut idx = 0i32;
+        let icon_loc = if link.GetIconLocation(&mut ibuf, &mut idx).is_ok() {
+            let end = ibuf.iter().position(|c| *c == 0).unwrap_or(ibuf.len());
+            let text = String::from_utf16_lossy(&ibuf[..end]);
+            if text.is_empty() { None } else { Some((text, idx)) }
+        } else {
+            None
+        };
+        (exe, icon_loc)
     }
 }
 
-fn highres_exe_icon(path: &str) -> Option<String> {
-    if path.is_empty() || !path.to_lowercase().ends_with(".exe") {
+fn highres_icon_index(path: &str, index: i32) -> Option<String> {
+    if path.is_empty() {
         return None;
     }
     unsafe {
         let mut buf = [0u16; 260];
-        let mut units: Vec<u16> = path.encode_utf16().take(259).collect();
+        let units: Vec<u16> = path.encode_utf16().take(259).collect();
         if units.is_empty() {
             return None;
         }
         buf[..units.len()].copy_from_slice(&units);
-        let _ = &mut units;
         let mut hicon = [HICON::default(); 1];
         let mut icon_id = [0u32; 1];
         let count = PrivateExtractIconsW(
             &buf,
-            0,
+            index,
             96,
             96,
             Some(&mut hicon),
@@ -184,6 +202,13 @@ fn highres_exe_icon(path: &str) -> Option<String> {
         }
         None
     }
+}
+
+fn highres_exe_icon(path: &str) -> Option<String> {
+    if path.is_empty() || !path.to_lowercase().ends_with(".exe") {
+        return None;
+    }
+    highres_icon_index(path, 0)
 }
 
 pub fn file_icon(path: &str) -> Option<String> {
@@ -407,6 +432,17 @@ pub fn activate(hwnd_value: i64) -> Result<(), String> {
         let _ = BringWindowToTop(hwnd);
         let _ = AttachThreadInput(current, target_thread, false);
         let _ = AttachThreadInput(current, fore_thread, false);
+    }
+    Ok(())
+}
+
+pub fn minimize_window(hwnd_value: i64) -> Result<(), String> {
+    let hwnd = HWND(hwnd_value as *mut _);
+    unsafe {
+        if hwnd.is_invalid() {
+            return Err("That window is gone.".into());
+        }
+        let _ = ShowWindow(hwnd, SW_MINIMIZE);
     }
     Ok(())
 }

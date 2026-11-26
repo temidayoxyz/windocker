@@ -92,7 +92,12 @@ input, textarea { user-select: text; }
   gap: 5px;
   background: transparent;
   border: 0;
+  max-width: calc(var(--screen, 1280px) - 300px);
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: none;
 }
+.tile.apps::-webkit-scrollbar { display: none; }
 .tile.apps:hover { background: transparent; }
 
 .dock-divider, .apps-sep {
@@ -169,12 +174,19 @@ input, textarea { user-select: text; }
   position: absolute;
   left: 50%;
   bottom: -6px;
-  width: 4.5px;
-  height: 4.5px;
+  width: 5px;
+  height: 4px;
   border-radius: 99px;
   background: var(--text);
-  opacity: 0.9;
+  opacity: 0.72;
   transform: translateX(-50%);
+  transition: width 160ms ease, background 160ms ease, opacity 160ms ease;
+}
+.app.run.active::after {
+  width: 14px;
+  background: var(--accent);
+  opacity: 1;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 .launchpad-grid {
   width: 68%;
@@ -814,6 +826,18 @@ textarea { min-height: 110px; resize: none; }
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid var(--line);
 }
+.win-ctrl-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  display: inline-grid;
+  place-items: center;
+  background: rgba(127, 127, 127, 0.16);
+  color: var(--text);
+  transition: background 120ms ease, color 120ms ease;
+}
+.win-ctrl-btn:hover { background: rgba(127, 127, 127, 0.3); }
+.win-ctrl-btn.danger:hover { background: rgba(255, 69, 58, 0.25); color: #ff453a; }
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-thumb { background: rgba(127, 127, 127, 0.35); border-radius: 99px; }

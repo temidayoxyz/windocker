@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LaunchpadModal, Picker, Settings, Welcome, WidgetCard } from "./components/Panels";
 import { Tile, remain, type MenuItem } from "./components/Widgets";
+import { SfSymbol } from "./icons/MacIcons";
 import type { AppEntry, Config, RunningWindow, Snapshot } from "./types";
 
 const emptySnap = (): Snapshot => ({
@@ -43,6 +45,7 @@ const emptySnap = (): Snapshot => ({
   remoteEvents: [],
   selfCpu: 0,
   selfMem: 0,
+  foregroundHwnd: 0,
   fullscreen: false,
   screenCssWidth: 1280,
   screenCssHeight: 800,
@@ -63,6 +66,7 @@ export default function App() {
   const [config, setConfig] = useState<Config | null>(null);
   const [catalog, setCatalog] = useState<AppEntry[]>([]);
   const [snap, setSnap] = useState<Snapshot>(emptySnap);
+  const [monMetrics, setMonMetrics] = useState<{ screenCssWidth: number; screenCssHeight: number; monitorScale: number } | null>(null);
   const [panel, setPanel] = useState<"welcome" | "picker" | "settings" | "launchpad" | string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [preview, setPreview] = useState<{ title: string; windows: RunningWindow[] } | null>(null);
@@ -135,18 +139,25 @@ export default function App() {
   useEffect(() => {
     let stop = false;
     const un: Array<() => void> = [];
+    const curWin = getCurrentWebviewWindow();
+    const isMain = curWin.label === "main";
     invoke<{ config: Config; catalog: AppEntry[] }>("bootstrap")
       .then((boot) => {
         if (stop) return;
         setConfig(boot.config);
         setCatalog(boot.catalog);
-        if (!boot.config.firstLaunchComplete) setPanel("welcome");
+        if (isMain && !boot.config.firstLaunchComplete) setPanel("welcome");
       })
       .catch(fail);
     listen<Snapshot>("snapshot", (e) => setSnap(e.payload)).then((f) => un.push(f));
+    curWin.listen<{ screenCssWidth: number; screenCssHeight: number; monitorScale: number }>("monitor", (e) => {
+      setMonMetrics(e.payload);
+    }).then((f) => un.push(f));
     listen<AppEntry[]>("catalog", (e) => setCatalog(e.payload)).then((f) => un.push(f));
     listen<Config>("config", (e) => setConfig(e.payload)).then((f) => un.push(f));
-    listen("open-settings", () => setPanel("settings")).then((f) => un.push(f));
+    if (isMain) {
+      listen("open-settings", () => setPanel("settings")).then((f) => un.push(f));
+    }
     listen<{ paths?: string[] }>("tauri://drag-drop", (event) => {
       for (const path of event.payload.paths ?? []) {
         invoke<Config>("pin_drop", { path }).then(setConfig).catch(fail);
@@ -263,7 +274,7 @@ export default function App() {
     "--h": `calc(46px * ${config.scale})`,
     "--gap": `${config.spacing}px`,
     "--pad": `${config.padding}px`,
-    "--screen": `${Math.max(640, snap.screenCssWidth)}px`,
+    "--screen": `${Math.max(640, monMetrics?.screenCssWidth ?? snap.screenCssWidth)}px`,
     "--text": isLight ? "#16161a" : "#f5f6fa",
     "--muted": isLight ? "rgba(20, 22, 28, 0.56)" : "rgba(240, 244, 252, 0.6)",
     "--pill": pillColor(config.style),
@@ -369,6 +380,10 @@ export default function App() {
             call("activate_window", { hwnd });
             closePreviewNow();
           }}
+          onMinimizeWin={(hwnd) => {
+            call("minimize_window", { hwnd });
+            closePreviewNow();
+          }}
           onCloseWin={(hwnd) => {
             call("close_window", { hwnd });
             closePreviewNow();
@@ -438,6 +453,7 @@ function WindowPreviewPop({
   onEnter,
   onLeave,
   onActivate,
+  onMinimizeWin,
   onCloseWin,
 }: {
   title: string;
@@ -445,6 +461,7 @@ function WindowPreviewPop({
   onEnter: () => void;
   onLeave: () => void;
   onActivate: (hwnd: number) => void;
+  onMinimizeWin: (hwnd: number) => void;
   onCloseWin: (hwnd: number) => void;
 }) {
   const [idx, setIdx] = useState(0);
@@ -479,7 +496,14 @@ function WindowPreviewPop({
     <div className="card win-preview-pop" onMouseEnter={onEnter} onMouseLeave={onLeave}>
       <div className="win-preview-head">
         <span className="tiny-bold truncate">{active.title || title}</span>
-        <button className="x" onClick={() => onCloseWin(active.hwnd)} title="Close window">×</button>
+        <div className="row-tight">
+          <button className="win-ctrl-btn" onClick={() => onMinimizeWin(active.hwnd)} title="Minimize window">
+            <SfSymbol name="minimize" size={11} />
+          </button>
+          <button className="win-ctrl-btn danger" onClick={() => onCloseWin(active.hwnd)} title="Close window">
+            <SfSymbol name="close" size={11} />
+          </button>
+        </div>
       </div>
       {windows.length > 1 && (
         <div className="win-preview-tabs">

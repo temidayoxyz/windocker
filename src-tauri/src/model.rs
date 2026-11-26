@@ -50,7 +50,7 @@ pub struct CalEvent {
     pub source: String,
 }
 
-fn default_icon_pack() -> String { "sequoia".into() }
+fn default_icon_pack() -> String { "windocker".into() }
 fn default_true() -> bool { true }
 fn default_pomo_round() -> u32 { 1 }
 fn default_pomo_total_rounds() -> u32 { 4 }
@@ -124,7 +124,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            version: 3,
+            version: 4,
             first_launch_complete: false,
             style: "liquid-glass".into(),
             accent: "#0a84ff".into(),
@@ -140,11 +140,11 @@ impl Default for Config {
             previews: true,
             lock_dock: false,
             taskbar_mode: "hidden".into(),
-            display_mode: "primary".into(),
+            display_mode: "all".into(),
             clock_24h: false,
             launch_at_startup: false,
             icon_pack: default_icon_pack(),
-            squircle_wrap: true,
+            squircle_wrap: false,
             show_running_apps: true,
             dock_divider: true,
             native_blur: false,
@@ -389,6 +389,7 @@ pub struct Snapshot {
     pub remote_events: Vec<CalEvent>,
     pub self_cpu: f32,
     pub self_mem: u64,
+    pub foreground_hwnd: i64,
     pub fullscreen: bool,
     pub screen_css_width: f64,
     pub screen_css_height: f64,

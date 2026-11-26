@@ -138,7 +138,7 @@ export function Settings(props: {
 
       <div className="cats">
         <button className={tab === "appearance" ? "on" : ""} onClick={() => setTab("appearance")}>Appearance</button>
-        <button className={tab === "icons" ? "on" : ""} onClick={() => setTab("icons")}>macOS Icons</button>
+        <button className={tab === "icons" ? "on" : ""} onClick={() => setTab("icons")}>Icons & Style</button>
         <button className={tab === "dock" ? "on" : ""} onClick={() => setTab("dock")}>Dock & Taskbar</button>
         <button className={tab === "automation" ? "on" : ""} onClick={() => setTab("automation")}>Smart & Keys</button>
       </div>
@@ -404,7 +404,14 @@ export function WidgetCard(props: {
           {windows.map((w) => (
             <button key={w.hwnd} onClick={() => { onCall("activate_window", { hwnd: w.hwnd }); onClose(); }}>
               <span className="truncate">{w.title}</span>
-              <span className="tiny danger" onClick={(e) => { e.stopPropagation(); onCall("close_window", { hwnd: w.hwnd }); }}>Close</span>
+              <span className="row-tight">
+                <span className="win-ctrl-btn" title="Minimize" onClick={(e) => { e.stopPropagation(); onCall("minimize_window", { hwnd: w.hwnd }); }}>
+                  <SfSymbol name="minimize" size={11} />
+                </span>
+                <span className="win-ctrl-btn danger" title="Close" onClick={(e) => { e.stopPropagation(); onCall("close_window", { hwnd: w.hwnd }); }}>
+                  <SfSymbol name="close" size={11} />
+                </span>
+              </span>
             </button>
           ))}
         </div>

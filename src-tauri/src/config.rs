@@ -33,6 +33,15 @@ impl Store {
             config.version = 3;
             migrated = true;
         }
+        if config.version < 4 {
+            if config.display_mode == "primary" && config.taskbar_mode == "hidden" {
+                config.display_mode = "all".into();
+            }
+            config.icon_pack = clean_icon_pack(&config.icon_pack);
+            config.squircle_wrap = false;
+            config.version = 4;
+            migrated = true;
+        }
         // Deduplicate pins if both "explorer" and a Start Menu File Explorer shortcut were pinned
         let has_explorer = config.pins.iter().any(|p| matches!(p, crate::model::Pin::App { id } if id == "explorer"));
         if has_explorer {
@@ -138,8 +147,10 @@ fn clean_style(v: &str) -> String {
 
 fn clean_icon_pack(v: &str) -> String {
     match v {
-        "sequoia" | "dark" | "glass" | "native" => v.to_string(),
-        _ => "sequoia".into(),
+        "windocker" | "squircle" | "dark" | "original" => v.to_string(),
+        "glass" => "squircle".into(),
+        "native" => "original".into(),
+        _ => "windocker".into(),
     }
 }
 

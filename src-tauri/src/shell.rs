@@ -258,11 +258,15 @@ pub fn place_window(hwnd: HWND, x: i32, y: i32, w: i32, h: i32) {
     }
 }
 
-pub fn foreground_is_borderless_fullscreen(our: HWND) -> bool {
+pub fn foreground_hwnd() -> i64 {
+    unsafe { GetForegroundWindow().0 as i64 }
+}
+
+pub fn foreground_fullscreen_monitor() -> Option<isize> {
     unsafe {
         let hwnd = GetForegroundWindow();
-        if hwnd.is_invalid() || hwnd == our {
-            return false;
+        if hwnd.is_invalid() {
+            return None;
         }
         let mut class = [0u16; 64];
         let n = windows::Win32::UI::WindowsAndMessaging::GetClassNameW(hwnd, &mut class);
@@ -275,11 +279,11 @@ pub fn foreground_is_borderless_fullscreen(our: HWND) -> bool {
                 | "WorkerW"
                 | "Windows.UI.Core.CoreWindow"
         ) {
-            return false;
+            return None;
         }
         let mut rect = RECT::default();
         if GetWindowRect(hwnd, &mut rect).is_err() {
-            return false;
+            return None;
         }
         let monitor = windows::Win32::Graphics::Gdi::MonitorFromWindow(
             hwnd,
@@ -290,16 +294,29 @@ pub fn foreground_is_borderless_fullscreen(our: HWND) -> bool {
             ..Default::default()
         };
         if !windows::Win32::Graphics::Gdi::GetMonitorInfoW(monitor, &mut info).as_bool() {
-            return false;
+            return None;
         }
         let covers = (rect.right - rect.left) >= (info.rcMonitor.right - info.rcMonitor.left) - 4
             && (rect.bottom - rect.top) >= (info.rcMonitor.bottom - info.rcMonitor.top) - 4;
         if !covers {
-            return false;
+            return None;
         }
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        let caption = WS_CAPTION.0;
-        style & caption == 0
+        if style & WS_CAPTION.0 == 0 {
+            Some(monitor.0 as isize)
+        } else {
+            None
+        }
+    }
+}
+
+pub fn monitor_handle_at(x: i32, y: i32) -> isize {
+    unsafe {
+        windows::Win32::Graphics::Gdi::MonitorFromPoint(
+            POINT { x, y },
+            windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST,
+        )
+        .0 as isize
     }
 }
 

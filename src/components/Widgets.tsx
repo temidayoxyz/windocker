@@ -74,6 +74,7 @@ export function fmt(ms: number) {
 export function AppIcon({
   app,
   running,
+  active,
   pack,
   squircleWrap,
   customIcons,
@@ -82,21 +83,23 @@ export function AppIcon({
 }: {
   app?: Pick<AppEntry, "id" | "name" | "exe" | "icon">;
   running?: boolean;
+  active?: boolean;
   pack: string;
   squircleWrap: boolean;
   customIcons?: Record<string, string>;
   fallbackIcon?: string | null;
   fallbackName?: string;
 }) {
-  const iconKey = pack !== "native" ? resolveMacIconKey(app, customIcons) : null;
+  const iconKey = pack !== "original" && pack !== "native" ? resolveMacIconKey(app, customIcons) : null;
   const imgSrc = app?.icon || fallbackIcon;
   const label = app?.name || fallbackName || "?";
   const hue = [...label].reduce((n, c) => n + c.charCodeAt(0), 0) % 360;
+  const framed = squircleWrap || pack === "squircle" || pack === "dark";
 
   let inner: React.ReactNode;
   if (iconKey) {
     inner = <MacPackGlyph iconKey={iconKey} pack={pack} />;
-  } else if (imgSrc && squircleWrap && pack !== "native") {
+  } else if (imgSrc && framed && pack !== "original" && pack !== "native") {
     inner = (
       <MacSquircleShell
         pack={pack}
@@ -120,7 +123,7 @@ export function AppIcon({
   }
 
   return (
-    <span className={running ? "app run" : "app"}>
+    <span className={`app ${running ? "run" : ""} ${active ? "active" : ""}`}>
       {inner}
     </span>
   );
@@ -339,6 +342,7 @@ export function Tile(props: {
                   <AppIcon
                     app={catalogMatch || { id: win.exe.toLowerCase(), name: win.name, exe: win.exe, icon: win.icon }}
                     running
+                    active={matches.some((m) => m.hwnd === snap.foregroundHwnd)}
                     pack={config.iconPack}
                     squircleWrap={config.squircleWrap}
                     customIcons={config.customIcons}
@@ -1154,6 +1158,7 @@ function PinButton(props: {
       <AppIcon
         app={app}
         running={windows.length > 0}
+        active={windows.some((w) => w.hwnd === snap.foregroundHwnd)}
         pack={config.iconPack}
         squircleWrap={config.squircleWrap}
         customIcons={config.customIcons}
