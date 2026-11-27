@@ -573,8 +573,13 @@ pub fn run() {
             pin_app,
             pin_exe,
             pin_drop,
+            pin_folder,
             unpin_app,
             reorder_pins,
+            list_folder,
+            quick_preview,
+            open_file,
+            reveal_in_explorer,
             group_apps,
             rename_group,
             launch_app,
@@ -1147,7 +1152,17 @@ fn set_widget_settings(
 
 #[tauri::command]
 fn pin_drop(core: State<Arc<Core>>, path: String) -> Result<Config, String> {
-    let entry = apps::entry_from_dropped(&path)?;
+    let trimmed = path.trim().trim_matches('"').to_string();
+    let p = std::path::Path::new(&trimmed);
+    if p.is_dir() {
+        let name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Folder")
+            .to_string();
+        return pin_folder(core, trimmed, Some(name));
+    }
+    let entry = apps::entry_from_dropped(&trimmed)?;
     {
         let mut catalog = core.catalog.lock().unwrap_or_else(|e| e.into_inner());
         if !catalog.iter().any(|app| app.id == entry.id) {
@@ -1161,6 +1176,54 @@ fn pin_drop(core: State<Arc<Core>>, path: String) -> Result<Config, String> {
             .any(|pin| matches!(pin, model::Pin::App { id } if id == &entry.id))
         {
             cfg.pins.push(model::Pin::App { id: entry.id });
+        }
+        cfg.clone()
+    }))
+}
+
+#[tauri::command]
+fn pin_folder(
+    core: State<Arc<Core>>,
+    path: String,
+    name: Option<String>,
+) -> Result<Config, String> {
+    let resolved = match path.as_str() {
+        "downloads" | "documents" | "desktop" | "pictures" => {
+            let home = std::env::var("USERPROFILE").map_err(|_| "USERPROFILE not set".to_string())?;
+            let sub = match path.as_str() {
+                "downloads" => "Downloads",
+                "documents" => "Documents",
+                "desktop" => "Desktop",
+                _ => "Pictures",
+            };
+            std::path::PathBuf::from(home)
+                .join(sub)
+                .to_string_lossy()
+                .to_string()
+        }
+        _ => path,
+    };
+    let p = std::path::Path::new(&resolved);
+    if !p.is_dir() {
+        return Err("That folder does not exist.".into());
+    }
+    let label = name.unwrap_or_else(|| {
+        p.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Folder")
+            .to_string()
+    });
+    let id = format!("folder:{}", resolved.to_lowercase());
+    Ok(core.store.with_mut(|cfg| {
+        if !cfg.pins.iter().any(|pin| match pin {
+            model::Pin::Folder { id: existing, .. } => existing == &id,
+            _ => false,
+        }) {
+            cfg.pins.push(model::Pin::Folder {
+                id,
+                name: label,
+                path: resolved,
+            });
         }
         cfg.clone()
     }))
@@ -1188,8 +1251,11 @@ fn pin_app(core: State<Arc<Core>>, id: String) -> Config {
 #[tauri::command]
 fn unpin_app(core: State<Arc<Core>>, id: String) -> Config {
     core.store.with_mut(|cfg| {
-        cfg.pins
-            .retain(|p| !matches!(p, model::Pin::App { id: existing } if existing == &id));
+        cfg.pins.retain(|p| match p {
+            model::Pin::App { id: existing } => existing != &id,
+            model::Pin::Group { id: existing } => existing != &id,
+            model::Pin::Folder { id: existing, .. } => existing != &id,
+        });
         cfg.clone()
     })
 }
@@ -1205,6 +1271,7 @@ fn reorder_pins(core: State<Arc<Core>>, ids: Vec<String>) -> Config {
                 .find(|p| match p {
                     model::Pin::App { id: existing } => existing == &id,
                     model::Pin::Group { id: existing } => existing == &id,
+                    model::Pin::Folder { id: existing, .. } => existing == &id,
                 })
                 .cloned()
             {
@@ -1214,6 +1281,178 @@ fn reorder_pins(core: State<Arc<Core>>, ids: Vec<String>) -> Config {
         cfg.pins = next;
         cfg.clone()
     })
+}
+
+#[tauri::command]
+async fn list_folder(path: String) -> Result<Vec<model::FolderItem>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = std::path::Path::new(&path);
+        if !dir.is_dir() {
+            return Err("Folder not found.".into());
+        }
+        let read = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+        let mut items = Vec::new();
+        for entry in read.flatten() {
+            let p = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || name.eq_ignore_ascii_case("desktop.ini") {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let is_dir = meta.is_dir();
+            let size = if is_dir { 0 } else { meta.len() };
+            let modified_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            let ext = if is_dir {
+                String::new()
+            } else {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase()
+            };
+            items.push(model::FolderItem {
+                name,
+                path: p.to_string_lossy().to_string(),
+                is_dir,
+                size,
+                modified_ms,
+                ext,
+            });
+        }
+        items.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then(b.modified_ms.cmp(&a.modified_ms))
+                .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        items.truncate(72);
+        Ok(items)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn quick_preview(path: String) -> Result<model::QuickPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = std::path::Path::new(&path);
+        if !p.exists() {
+            return Err("File not found.".into());
+        }
+        let name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("File")
+            .to_string();
+        let meta = std::fs::metadata(p).map_err(|e| e.to_string())?;
+        if meta.is_dir() {
+            let count = std::fs::read_dir(p).map(|r| r.count()).unwrap_or(0);
+            return Ok(model::QuickPreview {
+                name,
+                path,
+                kind: "dir".into(),
+                size: 0,
+                content: None,
+                child_count: Some(count),
+            });
+        }
+        let size = meta.len();
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp") {
+            let thumb = shell::thumbnail_data_url(&path, 420);
+            return Ok(model::QuickPreview {
+                name,
+                path,
+                kind: "image".into(),
+                size,
+                content: thumb,
+                child_count: None,
+            });
+        }
+        if matches!(
+            ext.as_str(),
+            "txt"
+                | "md"
+                | "json"
+                | "rs"
+                | "ts"
+                | "tsx"
+                | "js"
+                | "jsx"
+                | "py"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "css"
+                | "html"
+                | "log"
+                | "csv"
+                | "ini"
+                | "ps1"
+                | "cmd"
+                | "sh"
+                | "xml"
+        ) {
+            if let Ok(bytes) = std::fs::read(p) {
+                let slice = &bytes[..bytes.len().min(6144)];
+                let text = String::from_utf8_lossy(slice).to_string();
+                return Ok(model::QuickPreview {
+                    name,
+                    path,
+                    kind: "text".into(),
+                    size,
+                    content: Some(text),
+                    child_count: None,
+                });
+            }
+        }
+        Ok(model::QuickPreview {
+            name,
+            path,
+            kind: "binary".into(),
+            size,
+            content: None,
+            child_count: None,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn open_file(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        shell::open_path(&path);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn reveal_in_explorer(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("explorer.exe")
+            .arg(format!("/select,{path}"))
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

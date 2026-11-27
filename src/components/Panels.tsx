@@ -10,6 +10,8 @@ import {
   type AppEntry,
   type BluetoothDevice,
   type Config,
+  type FolderItem,
+  type QuickPreview,
   type Snapshot,
   type WallpaperItem,
   type Widget,
@@ -331,6 +333,14 @@ export function WidgetCard(props: {
     return <BluetoothPanel snap={snap} onCall={onCall} onClose={onClose} />;
   }
 
+  if (id.startsWith("stack:")) {
+    const stackId = id.slice(6);
+    const pin = config.pins.find((p) => p.type === "folder" && p.id === stackId);
+    if (pin && pin.type === "folder") {
+      return <StackPanel name={pin.name} rootPath={pin.path} onCall={onCall} onClose={onClose} />;
+    }
+  }
+
   if (id.startsWith("icon:")) {
     const appId = id.slice(5);
     const app = apps.get(appId);
@@ -428,6 +438,136 @@ export function WidgetCard(props: {
         <button className="x" onClick={onClose}>×</button>
       </div>
       <CardBody widget={widget} config={config} snap={snap} apps={apps} onPatch={onPatch} onCall={onCall} onClose={onClose} />
+    </section>
+  );
+}
+
+function StackPanel({
+  name,
+  rootPath,
+  onCall,
+  onClose,
+}: {
+  name: string;
+  rootPath: string;
+  onCall: (cmd: string, args?: Record<string, unknown>) => void;
+  onClose: () => void;
+}) {
+  const [curPath, setCurPath] = useState(rootPath);
+  const [items, setItems] = useState<FolderItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<"grid" | "list">("grid");
+  const [preview, setPreview] = useState<QuickPreview | null>(null);
+
+  useEffect(() => {
+    setCurPath(rootPath);
+    setPreview(null);
+  }, [rootPath]);
+
+  useEffect(() => {
+    setLoading(true);
+    invoke<FolderItem[]>("list_folder", { path: curPath })
+      .then(setItems)
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+  }, [curPath]);
+
+  const openPreview = (item: FolderItem) => {
+    invoke<QuickPreview>("quick_preview", { path: item.path })
+      .then(setPreview)
+      .catch(() => undefined);
+  };
+
+  const canGoUp = curPath.toLowerCase() !== rootPath.toLowerCase();
+  const goUp = () => {
+    const idx = Math.max(curPath.lastIndexOf("\\"), curPath.lastIndexOf("/"));
+    if (idx > 2) setCurPath(curPath.slice(0, idx));
+    setPreview(null);
+  };
+
+  return (
+    <section className="card picker mac-sheet stack-sheet">
+      <div className="panel-head">
+        <div className="row">
+          <div className="traffic-lights"><button className="tl red" onClick={onClose} /><span className="tl yellow" /><span className="tl green" /></div>
+          {canGoUp && (
+            <button className="pill-btn sm" onClick={goUp}>← Back</button>
+          )}
+          <h2 className="truncate">{curPath === rootPath ? name : curPath.split(/[/\\]/).pop()}</h2>
+        </div>
+        <div className="row-tight">
+          <button className="win-ctrl-btn" onClick={() => setView(view === "grid" ? "list" : "grid")} title={view === "grid" ? "List view" : "Grid view"}>
+            <SfSymbol name={view === "grid" ? "list" : "grid"} size={13} />
+          </button>
+          <button className="win-ctrl-btn" onClick={() => { onCall("open_file", { path: curPath }); onClose(); }} title="Open in Explorer">
+            <SfSymbol name="external" size={13} />
+          </button>
+          <button className="win-ctrl-btn danger" onClick={onClose} title="Close">
+            <SfSymbol name="close" size={12} />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="tiny muted">Loading folder…</p>
+      ) : items.length === 0 ? (
+        <p className="tiny muted">This folder is empty.</p>
+      ) : (
+        <div className={view === "grid" ? "stack-grid" : "stack-list"}>
+          {items.map((item) => (
+            <div key={item.path} className={`stack-item ${preview?.path === item.path ? "on" : ""}`}>
+              <button
+                className="stack-main"
+                onClick={() => {
+                  if (item.isDir) {
+                    setCurPath(item.path);
+                    setPreview(null);
+                  } else {
+                    onCall("open_file", { path: item.path });
+                    onClose();
+                  }
+                }}
+              >
+                <span className={`stack-glyph ${item.isDir ? "dir" : ""}`}>
+                  <SfSymbol name={item.isDir ? "folder" : "file"} size={view === "grid" ? 20 : 14} />
+                </span>
+                <span className="stack-meta">
+                  <span className="tiny-bold truncate">{item.name}</span>
+                  <span className="tiny muted">{item.isDir ? "Folder" : bytes(item.size)}</span>
+                </span>
+              </button>
+              <button className="win-ctrl-btn stack-eye" onClick={() => openPreview(item)} title="Quick Preview">
+                <SfSymbol name="eye" size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {preview && (
+        <div className="quick-preview-box">
+          <div className="panel-head" style={{ marginBottom: 6 }}>
+            <span className="tiny-bold truncate">{preview.name} · {preview.kind === "dir" ? `${preview.childCount ?? 0} items` : bytes(preview.size)}</span>
+            <div className="row-tight">
+              <button className="pill-btn sm" onClick={() => onCall("reveal_in_explorer", { path: preview.path })}>Reveal</button>
+              <button className="pill-btn sm" onClick={() => { onCall("open_file", { path: preview.path }); onClose(); }}>Open</button>
+              <button className="win-ctrl-btn" onClick={() => setPreview(null)}><SfSymbol name="close" size={11} /></button>
+            </div>
+          </div>
+          {preview.kind === "image" && preview.content && (
+            <img src={preview.content} alt={preview.name} className="qp-img" />
+          )}
+          {preview.kind === "text" && preview.content != null && (
+            <pre className="qp-text">{preview.content}</pre>
+          )}
+          {preview.kind === "dir" && (
+            <p className="tiny muted">Folder containing {preview.childCount ?? 0} item(s).</p>
+          )}
+          {preview.kind === "binary" && (
+            <p className="tiny muted">Binary file ({bytes(preview.size)}). Click Open to launch with default app.</p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

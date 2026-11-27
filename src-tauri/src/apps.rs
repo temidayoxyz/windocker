@@ -541,3 +541,16 @@ pub fn window_rect(hwnd_value: i64) -> Option<RECT> {
         Some(rect)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_apps_returns_entries() {
+        let start = std::time::Instant::now();
+        let apps = scan_apps();
+        println!("scan_apps found {} apps in {:?}", apps.len(), start.elapsed());
+        assert!(!apps.is_empty());
+    }
+}

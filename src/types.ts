@@ -12,7 +12,31 @@ export interface PinGroup {
   type: "group";
   id: string;
 }
-export type Pin = PinApp | PinGroup;
+export interface PinFolder {
+  type: "folder";
+  id: string;
+  name: string;
+  path: string;
+}
+export type Pin = PinApp | PinGroup | PinFolder;
+
+export interface FolderItem {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  modifiedMs: number;
+  ext: string;
+}
+
+export interface QuickPreview {
+  name: string;
+  path: string;
+  kind: "image" | "text" | "dir" | "binary";
+  size: number;
+  content: string | null;
+  childCount: number | null;
+}
 
 export interface Group {
   id: string;

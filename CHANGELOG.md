@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+
+Dock Stacks & Finder-lite update:
+
+- **Folder Dock Stacks**: Drag and drop any folder onto the dock (or right-click Launchpad to pin **Downloads**, **Documents**, or **Desktop**) to create expandable Dock Stacks with Grid/List views, subfolder navigation, and Explorer integration.
+- **Quick Preview (Finder-lite)**: Preview images, text/code/config files, and folder summaries directly inside any Dock Stack before opening or revealing in Windows Explorer.
+
 ## 1.3.1
 
 Hotfix for v1.3.0 multi-monitor, icon catalog, Launchpad search, and hover clipping:

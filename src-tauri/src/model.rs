@@ -14,6 +14,7 @@ pub struct Widget {
 pub enum Pin {
     App { id: String },
     Group { id: String },
+    Folder { id: String, name: String, path: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,6 +199,28 @@ pub struct WifiNetwork {
     pub signal: u32,
     pub security: String,
     pub connected: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderItem {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified_ms: i64,
+    pub ext: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickPreview {
+    pub name: String,
+    pub path: String,
+    pub kind: String,
+    pub size: u64,
+    pub content: Option<String>,
+    pub child_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]

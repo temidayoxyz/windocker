@@ -262,6 +262,9 @@ export function Tile(props: {
             props.openMenu(e, [
               { label: "Open Launchpad", run: () => setPanel("launchpad") },
               { label: "Open Windows Start", run: () => invoke("open_start") },
+              { label: "Pin Downloads Stack", run: () => onCall("pin_folder", { path: "downloads", name: "Downloads" }) },
+              { label: "Pin Documents Stack", run: () => onCall("pin_folder", { path: "documents", name: "Documents" }) },
+              { label: "Pin Desktop Stack", run: () => onCall("pin_folder", { path: "desktop", name: "Desktop" }) },
             ]);
           }}
         >
@@ -1088,6 +1091,32 @@ function PinButton(props: {
   onPreviewLeave?: () => void;
 }) {
   const { pin, config, snap, apps, onCall, setPanel } = props;
+  if (pin.type === "folder") {
+    return (
+      <button
+        className="app-hit"
+        data-label={config.showLabels ? pin.name : undefined}
+        style={props.magStyle}
+        onMouseEnter={props.onHover}
+        draggable
+        onDragStart={() => props.onDragPin(pin.id)}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => { event.preventDefault(); props.onDropPin(pin.id); }}
+        onClick={() => setPanel(`stack:${pin.id}`)}
+        onContextMenu={(event) => {
+          props.onPinMenu(event, [
+            { label: "Open Stack", run: () => setPanel(`stack:${pin.id}`) },
+            { label: "Open in Explorer", run: () => onCall("open_file", { path: pin.path }) },
+            { label: "Remove Stack", danger: true, run: () => onCall("unpin_app", { id: pin.id }) },
+          ]);
+        }}
+      >
+        <span className="app">
+          <MacFolderIcon pack={config.iconPack} />
+        </span>
+      </button>
+    );
+  }
   if (pin.type === "group") {
     const group = config.groups.find((g) => g.id === pin.id);
     return (
